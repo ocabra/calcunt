@@ -1,0 +1,693 @@
+/* calcunt has its own look, independent of the rest of the site.
+   Inspired by Apple Health: soft gray canvas, white cards, rounded
+   bars, one accent color per metric. Palette validated with the
+   dataviz skill's validate_palette.js (CVD + contrast checks pass;
+   see calcunt/DESIGN.md discussion). */
+
+:root {
+  --bg: #f2f2f7;
+  --card-bg: #ffffff;
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --text-primary: #1c1c1e;
+  --text-secondary: #6e6e73;
+  --hairline: #e5e5ea;
+  --row-alt: #fafafa;
+  --goal-line: #c7c7cc;
+
+  /* one accent per metric, fixed order: calories, carbs, protein, fat */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+
+  /* Deviation-from-goal scale, single source of truth for both the All
+     heatmap cells and the ring percent text — never define these colors
+     anywhere else. 5 tiers by |deviation %|: perfect <=7.5, good <=15,
+     poor <=22.5, bad <=30, terrible >30 (see deviationBucket in view.js). */
+  --dev-perfect: #1b8a3c;
+  --dev-good: #74c686;
+  --dev-poor: #f2a29d;
+  --dev-bad: #c62828;
+  --dev-terrible: #000000;
+
+  --radius-large: 14px;
+  --radius-main: 10px;
+  --tab-active-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --card-bg: #1c1c1e;
+    --card-shadow: none;
+    --text-primary: #f5f5f7;
+    --text-secondary: #98989d;
+    --hairline: #2c2c2e;
+    --row-alt: #212123;
+    --goal-line: #48484a;
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+
+    --dev-perfect: #2ea043;
+    --dev-good: #5fae70;
+    --dev-poor: #e0736f;
+    --dev-bad: #da3633;
+    /* pure black would be ~invisible against the dark card bg (#1c1c1e);
+       a mid gray is the dark-mode-legible equivalent of "black" here */
+    --dev-terrible: #8e8e93;
+
+    --tab-active-shadow: none;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: "Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
+  margin: 0;
+  padding: 18px 14px 36px;
+}
+
+.container {
+  max-width: 640px;
+  min-width: 0;
+  margin: 0 auto;
+}
+
+.tab-panel {
+  min-width: 0;
+}
+
+/* brand logo: only sizing lives here — the actual logo (shape, colors,
+   font) is entirely self-contained in assets/logo.svg. */
+h1.brand-logo {
+  margin: 0 0 12px;
+  line-height: 0;
+}
+
+.brand-logo object {
+  display: block;
+  height: 56px;
+  width: auto;
+  pointer-events: none; /* it's a static logo, not an interactive embed */
+}
+
+/* Wraps only #main-tabs for sizing purposes (width: fit-content), so
+   `margin: 0 auto` centers the bar itself on the page. The toggle is
+   positioned absolutely off .tabbar-row's right edge — being out of
+   flow, it never affects the bar's width or centering, whether it's
+   showing or not. */
+.tabbar-row {
+  position: relative;
+  width: fit-content;
+  margin: 0 auto 12px;
+}
+
+/* segmented-control tabs (claude.com tab_menu_inner / tab_btn_wrap style):
+   a tertiary-background track holding transparent buttons that each pick
+   up a card-colored pill when active. --hairline doubles as the track's
+   tertiary background here, same as it does as a border color elsewhere. */
+.tabs {
+  background-color: var(--hairline);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  width: fit-content;
+  border-radius: var(--radius-large);
+  padding: 0.2rem;
+}
+
+.tab-btn {
+  z-index: 1;
+  background-color: transparent;
+  max-width: 100%;
+  height: 2.15rem;
+  color: var(--text-secondary);
+  text-align: center;
+  justify-content: center;
+  align-items: center;
+  display: flex;
+  position: relative;
+  border: none;
+  border-radius: var(--radius-main);
+  padding: 0.4rem 0.8rem 0.4rem 0.65rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out, color 0.1s ease-in-out;
+}
+
+.tab-btn.active {
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+  box-shadow: var(--tab-active-shadow);
+}
+
+/* on/off toggle: aggregate (off, outlined) vs. per-meal (on, filled).
+   Positioned off the bar's right edge, out of normal flow — see
+   .tabbar-row. */
+.meal-toggle {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  transform: translateY(-50%);
+  margin-left: 8px;
+  white-space: nowrap;
+  background-color: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-main);
+  padding: 0.3rem 0.65rem;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: background-color 0.15s ease-in-out, color 0.1s ease-in-out, border-color 0.15s ease-in-out;
+}
+
+.meal-toggle[aria-pressed="true"] {
+  background-color: var(--text-primary);
+  color: var(--card-bg);
+  border-color: var(--text-primary);
+}
+
+/* keeps its layout space so the tab bar beside it never shifts when this
+   appears/disappears between tabs — invisible, not display:none */
+.meal-toggle-inactive {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.card {
+  background: var(--card-bg);
+  border-radius: 18px;
+  box-shadow: var(--card-shadow);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+/* The nutrition table is intentionally wider than a phone screen. Keep that
+   width inside the card and let the user pan the table, instead of allowing
+   its columns to widen the entire page. */
+#tabular-card {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+#tabular-card:focus-visible,
+.times-chart-scroll:focus-visible {
+  outline: 2px solid var(--series-1);
+  outline-offset: 2px;
+}
+
+#tabular-table {
+  min-width: 760px;
+}
+
+#tabular-table th,
+#tabular-table td {
+  white-space: nowrap;
+}
+
+#tabular-table th:nth-child(3),
+#tabular-table td:nth-child(3) {
+  min-width: 170px;
+  white-space: normal;
+}
+
+/* Week/Month in "Meal" granularity: one metric-grid group per meal,
+   stacked vertically, instead of the container itself being the grid. */
+.metric-grid.stacked-groups {
+  display: block;
+}
+
+.meal-group-heading {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 14px 0 6px;
+}
+
+.meal-group-heading:first-child {
+  margin-top: 0;
+}
+
+/* tabular view */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+  padding: 6px 5px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+td {
+  padding: 5px 5px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+tr.day-total td {
+  font-weight: 700;
+  background: var(--row-alt);
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* today / week / month: 2x2 grid of metric cards */
+.metric-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.metric-grid > * {
+  min-width: 0;
+}
+
+/* eating-time scatter plot */
+.times-card {
+  padding: 14px;
+}
+
+.times-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.times-header h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.times-header p {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  margin: 2px 0 0;
+}
+
+.meal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px 10px;
+}
+
+.meal-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  text-transform: capitalize;
+}
+
+.meal-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.meal-breakfast {
+  fill: var(--series-4);
+  background: var(--series-4);
+}
+
+.meal-lunch {
+  fill: var(--series-2);
+  background: var(--series-2);
+}
+
+.meal-dinner {
+  fill: var(--series-1);
+  background: var(--series-1);
+}
+
+.meal-snack {
+  fill: var(--series-3);
+  background: var(--series-3);
+}
+
+.times-chart-scroll {
+  max-width: 100%;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.times-chart-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+#times-chart svg {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+}
+
+.time-grid-line {
+  stroke: var(--hairline);
+  stroke-width: 1;
+}
+
+.time-axis-label,
+.time-day-label,
+.time-axis-title {
+  fill: var(--text-secondary);
+  font-size: 10px;
+}
+
+.time-axis-label {
+  text-anchor: end;
+}
+
+.time-day-label {
+  text-anchor: middle;
+}
+
+.time-axis-title {
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.time-point {
+  stroke: var(--card-bg);
+  stroke-width: 2;
+}
+
+.site-footer {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  text-align: center;
+  margin-top: 24px;
+}
+
+.site-footer a {
+  color: inherit;
+}
+
+@media (max-width: 480px) {
+  .tab-btn {
+    padding-right: 0.38rem;
+    padding-left: 0.38rem;
+    font-size: 0.8rem;
+  }
+
+  /* Absolutely positioned controls do not affect tab centering, so removing
+     an inactive toggle also keeps its invisible box out of mobile overflow. */
+  .meal-toggle-inactive {
+    display: none;
+  }
+
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .times-header {
+    display: block;
+  }
+
+  .meal-legend {
+    justify-content: flex-start;
+    margin-top: 8px;
+  }
+}
+
+.chart-card .chart-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.chart-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.chart-dot-calories {
+  background: var(--series-1);
+}
+.chart-dot-carbs_g {
+  background: var(--series-2);
+}
+.chart-dot-protein_g {
+  background: var(--series-3);
+}
+.chart-dot-fat_g {
+  background: var(--series-4);
+}
+
+.chart-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
+}
+
+.chart-value .unit {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-left: 3px;
+}
+
+.chart-card svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+
+.bar-calories {
+  fill: var(--series-1);
+}
+.bar-carbs_g {
+  fill: var(--series-2);
+}
+.bar-protein_g {
+  fill: var(--series-3);
+}
+.bar-fat_g {
+  fill: var(--series-4);
+}
+
+.bar-muted {
+  opacity: 0.32;
+}
+
+.goal-line {
+  stroke: var(--goal-line);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+
+.goal-label,
+.day-label {
+  font-size: 8.5px;
+  fill: var(--text-secondary);
+}
+
+.goal-label {
+  text-anchor: start;
+}
+
+.day-label {
+  text-anchor: middle;
+}
+
+.day-label.today {
+  font-weight: 700;
+  fill: var(--text-primary);
+}
+
+/* today: activity-ring style progress per metric */
+.ring-card {
+  text-align: center;
+}
+
+.ring-card .chart-header {
+  justify-content: center;
+}
+
+.ring-card svg {
+  width: 100%;
+  max-width: 150px;
+  height: auto;
+  display: block;
+  margin: 2px auto 0;
+}
+
+/* the ring itself (arc, gradient, rounded/shadowed tip) is drawn by
+   activity-ring.js with presentation attributes, not styled via CSS —
+   only the percent label overlay is ours */
+.ring-percent {
+  font-size: 18px;
+  font-weight: 700;
+  fill: var(--text-primary);
+  text-anchor: middle;
+}
+
+.ring-caption {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.ring-caption .value {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+/* caption numerator color = how close to goal, same buckets/colors as the
+   All heatmap and its legend (--dev-*) — the ring itself and the percent
+   text inside it stay neutral now. Scoped through .ring-caption to match
+   (and beat, by source order) .ring-caption .value's own specificity —
+   a bare .dev-text-* class alone would lose to that rule. */
+.ring-caption .dev-text-perfect {
+  color: var(--dev-perfect);
+}
+.ring-caption .dev-text-good {
+  color: var(--dev-good);
+}
+.ring-caption .dev-text-poor {
+  color: var(--dev-poor);
+}
+.ring-caption .dev-text-bad {
+  color: var(--dev-bad);
+}
+.ring-caption .dev-text-terrible {
+  color: var(--dev-terrible);
+}
+
+/* all: github-style 30-day squares, colored by deviation from goal */
+.heatmap-grid {
+  display: grid;
+  grid-template-rows: repeat(7, 12px);
+  grid-auto-flow: column;
+  grid-auto-columns: 12px;
+  gap: 3px;
+  margin: 6px 0 8px;
+}
+
+.heatmap-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.heatmap-cell.today {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 1px;
+}
+
+.dev-none {
+  background: var(--hairline);
+}
+.dev-perfect {
+  background: var(--dev-perfect);
+}
+.dev-good {
+  background: var(--dev-good);
+}
+.dev-poor {
+  background: var(--dev-poor);
+}
+.dev-bad {
+  background: var(--dev-bad);
+}
+.dev-terrible {
+  background: var(--dev-terrible);
+}
+
+/* worst -> best swatches, no labels — hover each for its threshold */
+.dev-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 14px;
+}
+
+.dev-legend-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.dev-legend-swatch {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+
+/* fast custom tooltip — the native `title` attribute's ~1s+ delay can't be
+   tuned, so each swatch gets its own via data-tooltip + ::after instead */
+.dev-legend-swatch::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text-primary);
+  color: var(--card-bg);
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border-radius: 6px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.08s ease-out;
+  z-index: 10;
+}
+
+.dev-legend-swatch:hover::after {
+  opacity: 1;
+  visibility: visible;
+}

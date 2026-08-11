@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>calcunt</title>
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Saira:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="calcunt.css">
+</head>
+<body>
+  <div class="container">
+    <h1 class="brand-logo">
+      <!-- the whole logo (shape, gradients, border, font) lives in one
+           place: assets/logo.svg — edit that file only, nothing here.
+           <object> (not <img>) so the SVG's own @font-face import for
+           Saira actually loads, same as the favicon copy does. -->
+      <object type="image/svg+xml" data="assets/logo.svg" aria-label="calcunt"></object>
+    </h1>
+
+    <div class="tabbar-row">
+      <nav class="tabs" id="main-tabs">
+        <button class="tab-btn" data-tab="today">today</button>
+        <button class="tab-btn" data-tab="week">week</button>
+        <button class="tab-btn" data-tab="month">month</button>
+        <button class="tab-btn" data-tab="all">all</button>
+        <button class="tab-btn" data-tab="times">times</button>
+        <button class="tab-btn" data-tab="table">table</button>
+      </nav>
+
+      <!-- on/off toggle, aggregate (off) vs. per-meal (on); only meaningful
+           on Week/Month, initTabs shows/hides this per active tab. Always
+           kept in the layout (never `hidden`) so the row never re-centers
+           around a different width — see .meal-toggle-inactive. -->
+      <button class="meal-toggle meal-toggle-inactive" id="meal-toggle" type="button" aria-pressed="false" tabindex="-1">meals</button>
+    </div>
+
+    <section id="tab-today" class="tab-panel">
+      <p id="today-status">loading...</p>
+      <div id="today-content" class="metric-grid" hidden></div>
+      <div id="today-legend" class="dev-legend" hidden></div>
+    </section>
+
+    <section id="tab-week" class="tab-panel" hidden>
+      <p id="week-status">loading...</p>
+      <div id="week-charts" class="metric-grid" hidden></div>
+    </section>
+
+    <section id="tab-month" class="tab-panel" hidden>
+      <p id="month-status">loading...</p>
+      <div id="month-charts" class="metric-grid" hidden></div>
+    </section>
+
+    <section id="tab-all" class="tab-panel" hidden>
+      <p id="all-status">loading...</p>
+      <div id="all-content" class="metric-grid" hidden></div>
+      <div id="all-legend" class="dev-legend" hidden></div>
+    </section>
+
+    <section id="tab-times" class="tab-panel" hidden>
+      <p id="times-status">loading...</p>
+      <div class="card times-card" id="times-card" hidden>
+        <div class="times-header">
+          <div>
+            <h2>Eating times</h2>
+          </div>
+          <div class="meal-legend" id="times-legend" aria-label="Meal colors"></div>
+        </div>
+        <div class="times-chart-scroll" aria-label="Eating times chart">
+          <div id="times-chart"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-table" class="tab-panel" hidden>
+      <p id="tabular-status">loading...</p>
+      <div class="card" id="tabular-card" tabindex="0" role="region" aria-label="Nutrition entries table; scroll horizontally for all columns" hidden>
+        <table id="tabular-table">
+          <thead>
+            <tr>
+              <th>date</th>
+              <th>meal</th>
+              <th>food</th>
+              <th class="num">qty (g)</th>
+              <th class="num">kcal</th>
+              <th class="num">carbs (g)</th>
+              <th class="num">protein (g)</th>
+              <th class="num">fat (g)</th>
+              <th class="num">fiber (g)</th>
+            </tr>
+          </thead>
+          <tbody id="tabular-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="site-footer">
+      <div>Copyright &copy; 2026 Henrique de Carvalho</div>
+      <div><a href="https://github.com/ocabra/calcunt">use calcunt!</a></div>
+    </footer>
+  </div>
+
+  <script src="activity-ring.js"></script>
+  <script type="module" src="view.js"></script>
+</body>
+</html>

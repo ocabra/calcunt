@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-6 -6 312 142" width="300" height="130">
+  <!-- 3D rectangle: front face (blue outline only, transparent, holds
+       the letters), top face (pink) and right/depth face (blue), both
+       extruded up-and-right off the front face. -->
+  <style><![CDATA[
+    @import url('https://fonts.googleapis.com/css2?family=Saira:wght@700&display=swap');
+    .logo-text {
+      font-family: "Saira", sans-serif;
+      font-weight: 700;
+      font-size: 50px;
+      fill: #1907e3;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+  ]]></style>
+
+  <!-- top face -->
+  <polygon
+    points="0,30 270,30 300,0 30,0"
+    fill="none"
+    stroke="#1907e3"
+    stroke-width="4"
+    stroke-linejoin="round"
+  />
+  <!-- right (depth) face -->
+  <polygon
+    points="270,30 300,0 300,100 270,130"
+    fill="#f59290"
+    stroke="#1907e3"
+    stroke-width="4"
+    stroke-linejoin="round"
+  />
+  <!-- front face, drawn last so its outline stays crisp over the seams -->
+  <rect x="0" y="30" width="270" height="100" fill="none" stroke="#1907e3" stroke-width="4" />
+  <text x="135" y="80" class="logo-text">calc*unt</text>
+</svg>
