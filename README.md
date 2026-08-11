@@ -3,7 +3,11 @@
 Instalacao bem simples:
 
 1. Faca um fork deste repositorio: https://github.com/ocabra/calcunt
-2. Coloque o fork no seu GitHub Pages, direto ou como submodule dentro do seu repositorio de Pages.
+2. Coloque o fork no seu GitHub Pages, direto ou como submodule dentro do seu repositorio de Pages:
+
+```sh
+git submodule add -b main https://github.com/SEU-USUARIO/calcunt.git calcunt
+```
 3. Crie um projeto no Supabase com o schema descrito em `calcunt-database-schema.md`.
 4. Edite `config.js` e coloque a URL do seu projeto Supabase e a sua publishable key:
 
