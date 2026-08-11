@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -22,83 +22,65 @@
 
     <div class="tabbar-row">
       <nav class="tabs" id="main-tabs">
-        <button class="tab-btn" data-tab="today">today</button>
-        <button class="tab-btn" data-tab="week">week</button>
-        <button class="tab-btn" data-tab="month">month</button>
-        <button class="tab-btn" data-tab="all">all</button>
-        <button class="tab-btn" data-tab="times">times</button>
-        <button class="tab-btn" data-tab="table">table</button>
+        <button class="tab-btn" data-tab="today">dia</button>
+        <button class="tab-btn" data-tab="week">sem</button>
+        <button class="tab-btn" data-tab="month">mês</button>
+        <button class="tab-btn" data-tab="year">ano</button>
+        <button class="tab-btn" data-tab="times">horários</button>
+        <button class="tab-btn" data-tab="trends">tendências</button>
       </nav>
 
       <!-- on/off toggle, aggregate (off) vs. per-meal (on); only meaningful
            on Week/Month, initTabs shows/hides this per active tab. Always
            kept in the layout (never `hidden`) so the row never re-centers
            around a different width — see .meal-toggle-inactive. -->
-      <button class="meal-toggle meal-toggle-inactive" id="meal-toggle" type="button" aria-pressed="false" tabindex="-1">meals</button>
+      <button class="meal-toggle meal-toggle-inactive" id="meal-toggle" type="button" aria-pressed="false" tabindex="-1">refeições</button>
     </div>
 
     <section id="tab-today" class="tab-panel">
-      <p id="today-status">loading...</p>
-      <div id="today-content" class="metric-grid" hidden></div>
-      <div id="today-legend" class="dev-legend" hidden></div>
+      <p id="today-status" hidden></p>
+      <div id="today-content" class="metric-grid"></div>
     </section>
 
     <section id="tab-week" class="tab-panel" hidden>
-      <p id="week-status">loading...</p>
+      <p id="week-status" hidden></p>
       <div id="week-charts" class="metric-grid" hidden></div>
     </section>
 
     <section id="tab-month" class="tab-panel" hidden>
-      <p id="month-status">loading...</p>
+      <p id="month-status" hidden></p>
       <div id="month-charts" class="metric-grid" hidden></div>
     </section>
 
-    <section id="tab-all" class="tab-panel" hidden>
-      <p id="all-status">loading...</p>
-      <div id="all-content" class="metric-grid" hidden></div>
-      <div id="all-legend" class="dev-legend" hidden></div>
+    <section id="tab-year" class="tab-panel" hidden>
+      <p id="year-status" hidden></p>
+      <div id="year-charts" class="metric-grid" hidden></div>
     </section>
 
     <section id="tab-times" class="tab-panel" hidden>
-      <p id="times-status">loading...</p>
+      <p id="times-status" hidden></p>
       <div class="card times-card" id="times-card" hidden>
         <div class="times-header">
           <div>
-            <h2>Eating times</h2>
+          <!-- using this empty div to level the legend -->
           </div>
-          <div class="meal-legend" id="times-legend" aria-label="Meal colors"></div>
+          <div class="meal-legend" id="times-legend" aria-label="Cores das refeições"></div>
         </div>
-        <div class="times-chart-scroll" aria-label="Eating times chart">
+        <div class="times-chart-scroll" aria-label="Tabela de horários">
           <div id="times-chart"></div>
         </div>
       </div>
     </section>
 
-    <section id="tab-table" class="tab-panel" hidden>
-      <p id="tabular-status">loading...</p>
-      <div class="card" id="tabular-card" tabindex="0" role="region" aria-label="Nutrition entries table; scroll horizontally for all columns" hidden>
-        <table id="tabular-table">
-          <thead>
-            <tr>
-              <th>date</th>
-              <th>meal</th>
-              <th>food</th>
-              <th class="num">qty (g)</th>
-              <th class="num">kcal</th>
-              <th class="num">carbs (g)</th>
-              <th class="num">protein (g)</th>
-              <th class="num">fat (g)</th>
-              <th class="num">fiber (g)</th>
-            </tr>
-          </thead>
-          <tbody id="tabular-body"></tbody>
-        </table>
-      </div>
+    <section id="tab-trends" class="tab-panel" hidden>
+      <p id="all-status" hidden></p>
+      <div id="all-content" class="metric-grid" hidden></div>
+      <div id="all-legend" class="dev-legend" hidden></div>
     </section>
 
     <footer class="site-footer">
-      <div>Copyright &copy; 2026 Henrique de Carvalho</div>
-      <div>v0.1.0 · <a href="https://github.com/ocabra/calcunt">use calcunt!</a></div>
+      <div>&copy; 2026 Henrique de Carvalho</div>
+      <div>v0.2.0 · <a href="https://github.com/ocabra/calcunt">use calcunt!</a></div>
     </footer>
   </div>
 

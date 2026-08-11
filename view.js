@@ -15,13 +15,19 @@ const APP_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
 
 const MEAL_ORDER = { breakfast: 0, lunch: 1, dinner: 2, snack: 3 };
 const MEALS = Object.keys(MEAL_ORDER);
+const MEAL_TITLES = {
+  breakfast: "Café da manhã",
+  lunch: "Almoço",
+  dinner: "Jantar",
+  snack: "Lanche",
+};
 // fixed order: also the fixed color-slot order in calcunt.css (--series-1..4)
 const METRICS = ["calories", "carbs_g", "protein_g", "fat_g"];
 const METRIC_TITLES = {
-  calories: "Calories",
-  carbs_g: "Carbs",
-  protein_g: "Protein",
-  fat_g: "Fat",
+  calories: "Calorias",
+  carbs_g: "Carboidratos",
+  protein_g: "Proteína",
+  fat_g: "Gordura",
 };
 const METRIC_UNITS = {
   calories: "kcal",
@@ -159,7 +165,8 @@ function renderTimes(enriched) {
   chart.innerHTML = "";
   legend.innerHTML = "";
   if (events.length === 0) {
-    status.textContent = "no eating times logged yet";
+    status.textContent = "nenhum horário registrado";
+    status.hidden = false;
     card.hidden = true;
     return;
   }
@@ -174,7 +181,7 @@ function renderTimes(enriched) {
     const dot = document.createElement("span");
     dot.className = `meal-dot meal-${meal}`;
     item.appendChild(dot);
-    item.appendChild(document.createTextNode(meal));
+    item.appendChild(document.createTextNode(MEAL_TITLES[meal]));
     legend.appendChild(item);
   }
 
@@ -204,11 +211,11 @@ function renderTimes(enriched) {
     "aria-labelledby": "times-chart-title times-chart-description",
   });
   const title = svgElement("title", { id: "times-chart-title" });
-  title.textContent = "Eating time by calendar day and meal";
+  title.textContent = "Horários por dia e refeição";
   svg.appendChild(title);
   const description = svgElement("desc", { id: "times-chart-description" });
   description.textContent =
-    "Calendar day is on the horizontal axis and wall-clock time is on the vertical axis. Colors identify breakfast, lunch, dinner, and snack.";
+    "O dia fica no eixo horizontal e o horário fica no eixo vertical. As cores identificam café da manhã, almoço, jantar e lanche.";
   svg.appendChild(description);
 
   for (let hour = 0; hour <= 24; hour += 4) {
@@ -259,7 +266,7 @@ function renderTimes(enriched) {
       class: `time-point meal-${event.meal}`,
     });
     const tip = svgElement("title");
-    tip.textContent = `${displayDate(event.date)} · ${event.time} · ${event.meal}`;
+    tip.textContent = `${displayDate(event.date)} · ${event.time} · ${MEAL_TITLES[event.meal]}`;
     point.appendChild(tip);
     svg.appendChild(point);
   }
@@ -382,6 +389,50 @@ function computeSeries(enriched, days) {
   return { days, series };
 }
 
+function trailingPeriods(periodDays, count) {
+  const today = epochDay(appDate());
+  const periods = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const startDay = today - (i + 1) * periodDays + 1;
+    const endDay = startDay + periodDays - 1;
+    const start = dateFromEpochDay(startDay);
+    const end = dateFromEpochDay(endDay);
+    periods.push({
+      days: trailingDatesForRange(startDay, endDay),
+      label: dateShort(start),
+      tooltip: `${dateShort(start)}-${dateShort(end)}`,
+      goalDays: periodDays,
+    });
+  }
+  return periods;
+}
+
+function trailingDatesForRange(startDay, endDay) {
+  const days = [];
+  for (let day = startDay; day <= endDay; day++) {
+    days.push(dateFromEpochDay(day));
+  }
+  return days;
+}
+
+function computePeriodSeries(enriched, periods) {
+  const series = {};
+  for (const metric of METRICS) series[metric] = periods.map(() => 0);
+
+  const periodByDate = new Map();
+  periods.forEach((period, periodIndex) => {
+    for (const day of period.days) periodByDate.set(day, periodIndex);
+  });
+
+  for (const row of enriched) {
+    const idx = periodByDate.get(row.date);
+    if (idx === undefined) continue;
+    for (const metric of METRICS) series[metric][idx] += row[metric];
+  }
+
+  return { periods, series };
+}
+
 // path for a bar with rounded top corners, square baseline (dataviz mark spec)
 function roundedTopBarPath(x, y, w, h, r) {
   const rr = Math.max(0, Math.min(r, w / 2, h));
@@ -393,7 +444,7 @@ function roundedTopBarPath(x, y, w, h, r) {
 
 function weekdayShort(dateStr) {
   const d = new Date(dateStr + "T00:00:00Z");
-  return d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+  return d.toLocaleDateString("pt-BR", { weekday: "short", timeZone: "UTC" });
 }
 
 function dateShort(dateStr) {
@@ -404,11 +455,16 @@ function dateShort(dateStr) {
 function renderBarChart(metric, values, days, goal, opts = {}) {
   const labelEvery = opts.labelEvery ?? 1;
   const labelFormat = opts.labelFormat ?? "weekday";
+  const labels = opts.labels ?? days;
+  const tooltipLabels = opts.tooltipLabels ?? days.map(displayDate);
+  const currentLabel = opts.currentLabel ?? "Hoje";
+  const valueCaption = opts.valueCaption ?? "hoje";
   const unit = METRIC_UNITS[metric];
   const width = 300;
   const height = 150;
   const chartW = 292;
   const chartH = 96;
+  const overlayLabelClearance = 56;
   const marginLeft = 4;
   const marginTop = 6;
   const slotWidth = chartW / values.length;
@@ -425,6 +481,54 @@ function renderBarChart(metric, values, days, goal, opts = {}) {
   plot.setAttribute("transform", `translate(${marginLeft},${marginTop})`);
   svg.appendChild(plot);
 
+  values.forEach((val, i) => {
+    const isToday = i === todayIndex;
+    const x = i * slotWidth + (slotWidth - barWidth) / 2;
+    const barY = y(val);
+    const barH = Math.max(chartH - barY, 0);
+
+    if (barH > 0) {
+      const bar = document.createElementNS(svgNS, "path");
+      bar.setAttribute("d", roundedTopBarPath(x, barY, barWidth, barH, 4));
+      bar.setAttribute("class", `bar-${metric}${isToday ? "" : " bar-muted"}`);
+      const tip = document.createElementNS(svgNS, "title");
+      tip.textContent = `${tooltipLabels[i]}: ${Math.round(val)} ${unit}`;
+      bar.appendChild(tip);
+      plot.appendChild(bar);
+    }
+
+    // label selectively: today always, others every `labelEvery` bars
+    // counting back from today, to avoid overlap on dense charts (month view)
+    if (isToday || (todayIndex - i) % labelEvery === 0) {
+      const dayLabel = document.createElementNS(svgNS, "text");
+      dayLabel.setAttribute("x", x + barWidth / 2);
+      dayLabel.setAttribute("y", chartH + 14);
+      dayLabel.setAttribute("class", `day-label${isToday ? " today" : ""}`);
+      dayLabel.textContent = isToday
+        ? currentLabel
+        : labelFormat === "date"
+          ? dateShort(days[i])
+          : labelFormat === "label"
+            ? labels[i]
+          : weekdayShort(days[i]);
+      plot.appendChild(dayLabel);
+    }
+  });
+
+  const averageValues = values.filter((val) => val > 0);
+  if (averageValues.length > 0) {
+    const average =
+      averageValues.reduce((sum, val) => sum + val, 0) / averageValues.length;
+    const averageY = y(average);
+    const averageLine = document.createElementNS(svgNS, "line");
+    averageLine.setAttribute("x1", overlayLabelClearance);
+    averageLine.setAttribute("x2", chartW);
+    averageLine.setAttribute("y1", averageY);
+    averageLine.setAttribute("y2", averageY);
+    averageLine.setAttribute("class", "average-line");
+    plot.appendChild(averageLine);
+  }
+
   const goalY = y(goal);
   const goalLine = document.createElementNS(svgNS, "line");
   goalLine.setAttribute("x1", 0);
@@ -438,40 +542,8 @@ function renderBarChart(metric, values, days, goal, opts = {}) {
   goalLabel.setAttribute("x", 0);
   goalLabel.setAttribute("y", goalY - 4);
   goalLabel.setAttribute("class", "goal-label");
-  goalLabel.textContent = `Goal ${goal}`;
+  goalLabel.textContent = `Meta ${goal}`;
   plot.appendChild(goalLabel);
-
-  values.forEach((val, i) => {
-    const isToday = i === todayIndex;
-    const x = i * slotWidth + (slotWidth - barWidth) / 2;
-    const barY = y(val);
-    const barH = Math.max(chartH - barY, 0);
-
-    if (barH > 0) {
-      const bar = document.createElementNS(svgNS, "path");
-      bar.setAttribute("d", roundedTopBarPath(x, barY, barWidth, barH, 4));
-      bar.setAttribute("class", `bar-${metric}${isToday ? "" : " bar-muted"}`);
-      const tip = document.createElementNS(svgNS, "title");
-      tip.textContent = `${displayDate(days[i])}: ${Math.round(val)} ${unit}`;
-      bar.appendChild(tip);
-      plot.appendChild(bar);
-    }
-
-    // label selectively: today always, others every `labelEvery` bars
-    // counting back from today, to avoid overlap on dense charts (month view)
-    if (isToday || (todayIndex - i) % labelEvery === 0) {
-      const dayLabel = document.createElementNS(svgNS, "text");
-      dayLabel.setAttribute("x", x + barWidth / 2);
-      dayLabel.setAttribute("y", chartH + 14);
-      dayLabel.setAttribute("class", `day-label${isToday ? " today" : ""}`);
-      dayLabel.textContent = isToday
-        ? "Today"
-        : labelFormat === "date"
-          ? dateShort(days[i])
-          : weekdayShort(days[i]);
-      plot.appendChild(dayLabel);
-    }
-  });
 
   const card = document.createElement("div");
   card.className = "card chart-card";
@@ -490,7 +562,7 @@ function renderBarChart(metric, values, days, goal, opts = {}) {
   numSpan.textContent = Math.round(values[todayIndex]);
   const unitSpan = document.createElement("span");
   unitSpan.className = "unit";
-  unitSpan.textContent = ` ${unit} today`;
+  unitSpan.textContent = ` ${unit} ${valueCaption}`;
   valueDiv.appendChild(numSpan);
   valueDiv.appendChild(unitSpan);
   card.appendChild(valueDiv);
@@ -527,7 +599,7 @@ function renderMetricGrid(
 
       const heading = document.createElement("h2");
       heading.className = "meal-group-heading";
-      heading.textContent = meal.charAt(0).toUpperCase() + meal.slice(1);
+      heading.textContent = MEAL_TITLES[meal];
       container.appendChild(heading);
 
       const group = document.createElement("div");
@@ -561,6 +633,78 @@ function renderMetricGrid(
   container.hidden = false;
 }
 
+function renderYearGrid(
+  containerId,
+  statusId,
+  enriched,
+  periods,
+  goals,
+  granularity,
+) {
+  const container = document.getElementById(containerId);
+  const status = document.getElementById(statusId);
+  container.innerHTML = "";
+
+  const opts = {
+    labelEvery: 4,
+    labelFormat: "label",
+    labels: periods.map((period) => period.label),
+    tooltipLabels: periods.map((period) => period.tooltip),
+    currentLabel: "Atual",
+    valueCaption: "no período",
+  };
+
+  if (granularity === "meal") {
+    container.classList.add("stacked-groups");
+    for (const meal of MEALS) {
+      const mealSeries = computePeriodSeries(
+        enriched.filter((r) => r.meal === meal),
+        periods,
+      ).series;
+
+      const heading = document.createElement("h2");
+      heading.className = "meal-group-heading";
+      heading.textContent = MEAL_TITLES[meal];
+      container.appendChild(heading);
+
+      const group = document.createElement("div");
+      group.className = "metric-grid";
+      for (const metric of METRICS) {
+        const goal = (goals[meal]?.[metric] ?? 0) * periods[0].goalDays;
+        group.appendChild(
+          renderBarChart(
+            metric,
+            mealSeries[metric],
+            periods.map((p) => p.days[0]),
+            goal,
+            opts,
+          ),
+        );
+      }
+      container.appendChild(group);
+    }
+  } else {
+    container.classList.remove("stacked-groups");
+    const { series } = computePeriodSeries(enriched, periods);
+    for (const metric of METRICS) {
+      const goal = dailyGoal(goals, metric) * periods[0].goalDays;
+      container.appendChild(
+        renderBarChart(
+          metric,
+          series[metric],
+          periods.map((p) => p.days[0]),
+          goal,
+          opts,
+        ),
+      );
+    }
+  }
+
+  log(`rendered ${containerId} (${granularity})`);
+  status.hidden = true;
+  container.hidden = false;
+}
+
 // -- today: today's totals vs goal, as activity rings ----------------------
 
 // fixed order, matches --series-1..4 in calcunt.css
@@ -570,6 +714,7 @@ const METRIC_SERIES_VAR = {
   protein_g: "--series-3",
   fat_g: "--series-4",
 };
+const RING_ANIMATION_MS = 800;
 
 function metricColorHex(metric) {
   return getComputedStyle(document.documentElement)
@@ -577,20 +722,12 @@ function metricColorHex(metric) {
     .trim();
 }
 
-function renderRingCard(metric, value, goal) {
+function drawRingProgress(svg, metric, value, goal) {
   const unit = METRIC_UNITS[metric];
   const rawProgress = goal > 0 ? value / goal : 0;
+  svg.innerHTML = "";
 
-  // caption's numerator color = how close to goal, same buckets as the
-  // All heatmap; the ring itself stays the metric's own color
-  const deviationPct = goal > 0 ? (Math.abs(value - goal) / goal) * 100 : 0;
-  const deviationTextClass = `dev-text-${deviationBucket(deviationPct)}`;
-
-  const svgNS = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(svgNS, "svg");
-  svg.setAttribute("viewBox", "0 0 100 100");
-
-  const titleEl = document.createElementNS(svgNS, "title");
+  const titleEl = document.createElementNS(SVG_NS, "title");
   titleEl.textContent = `${Math.round(value)} / ${goal} ${unit} (${Math.round(rawProgress * 100)}%)`;
   svg.appendChild(titleEl);
 
@@ -606,13 +743,45 @@ function renderRingCard(metric, value, goal) {
     width: 10,
   });
 
-  const percentLabel = document.createElementNS(svgNS, "text");
+  const percentLabel = document.createElementNS(SVG_NS, "text");
   percentLabel.setAttribute("x", 50);
   percentLabel.setAttribute("y", 50);
   percentLabel.setAttribute("dominant-baseline", "central");
   percentLabel.setAttribute("class", "ring-percent");
   percentLabel.textContent = `${Math.round(rawProgress * 100)}%`;
   svg.appendChild(percentLabel);
+}
+
+function updateRingCaption(valueSpan, suffixNode, value, goal, metric) {
+  const unit = METRIC_UNITS[metric];
+  const deviationPct = goal > 0 ? (Math.abs(value - goal) / goal) * 100 : 0;
+  valueSpan.className = `value dev-text-${deviationBucket(deviationPct)}`;
+  valueSpan.textContent = Math.round(value);
+  suffixNode.textContent = ` / ${goal} ${unit}`;
+}
+
+function animateRingCard(parts, metric, finalValue, goal) {
+  const startTime = performance.now();
+
+  function frame(now) {
+    const elapsed = now - startTime;
+    const t = Math.min(1, elapsed / RING_ANIMATION_MS);
+    const eased = 1 - Math.pow(1 - t, 3);
+    const value = finalValue * eased;
+    drawRingProgress(parts.svg, metric, value, goal);
+    updateRingCaption(parts.valueSpan, parts.suffixNode, value, goal, metric);
+    if (t < 1) requestAnimationFrame(frame);
+  }
+
+  requestAnimationFrame(frame);
+}
+
+function renderRingCard(metric, value, goal, opts = {}) {
+  const initialValue = opts.animate ? 0 : value;
+
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 100 100");
+  drawRingProgress(svg, metric, initialValue, goal);
 
   const card = document.createElement("div");
   card.className = "card chart-card ring-card";
@@ -630,16 +799,20 @@ function renderRingCard(metric, value, goal) {
   const caption = document.createElement("div");
   caption.className = "ring-caption";
   const valueSpan = document.createElement("span");
-  valueSpan.className = `value ${deviationTextClass}`;
-  valueSpan.textContent = Math.round(value);
+  const suffixNode = document.createTextNode("");
+  updateRingCaption(valueSpan, suffixNode, initialValue, goal, metric);
   caption.appendChild(valueSpan);
-  caption.appendChild(document.createTextNode(` / ${goal} ${unit}`));
+  caption.appendChild(suffixNode);
   card.appendChild(caption);
+
+  if (opts.animate) {
+    animateRingCard({ svg, valueSpan, suffixNode }, metric, value, goal);
+  }
 
   return card;
 }
 
-function renderToday(enriched, goals, granularity) {
+function renderToday(enriched, goals, granularity, opts = {}) {
   const container = document.getElementById("today-content");
   const status = document.getElementById("today-status");
   container.innerHTML = "";
@@ -655,7 +828,7 @@ function renderToday(enriched, goals, granularity) {
 
       const heading = document.createElement("h2");
       heading.className = "meal-group-heading";
-      heading.textContent = meal.charAt(0).toUpperCase() + meal.slice(1);
+      heading.textContent = MEAL_TITLES[meal];
       container.appendChild(heading);
 
       const group = document.createElement("div");
@@ -663,7 +836,7 @@ function renderToday(enriched, goals, granularity) {
       for (const metric of METRICS) {
         const value = mealRows.reduce((sum, r) => sum + r[metric], 0);
         const goal = goals[meal]?.[metric] ?? 0;
-        group.appendChild(renderRingCard(metric, value, goal));
+        group.appendChild(renderRingCard(metric, value, goal, opts));
       }
       container.appendChild(group);
     }
@@ -671,7 +844,12 @@ function renderToday(enriched, goals, granularity) {
     container.classList.remove("stacked-groups");
     for (const metric of METRICS) {
       const value = todaysRows.reduce((sum, r) => sum + r[metric], 0);
-      const card = renderRingCard(metric, value, dailyGoal(goals, metric));
+      const card = renderRingCard(
+        metric,
+        value,
+        dailyGoal(goals, metric),
+        opts,
+      );
       container.appendChild(card);
     }
   }
@@ -679,7 +857,16 @@ function renderToday(enriched, goals, granularity) {
   log("rendered today rings");
   status.hidden = true;
   container.hidden = false;
-  renderDeviationLegend("today-legend");
+}
+
+function renderEmptyToday() {
+  const emptyGoals = Object.fromEntries(
+    MEALS.map((meal) => [
+      meal,
+      Object.fromEntries(METRICS.map((metric) => [metric, 0])),
+    ]),
+  );
+  renderToday([], emptyGoals, "aggregate");
 }
 
 // -- all: github-style heatmap, colored by deviation from goal ------------
@@ -752,12 +939,12 @@ function populateHeatmapGrid(grid, metric, days, enriched, goal) {
 
     if (dayRows.length === 0) {
       cell.classList.add("dev-none");
-      cell.title = `${displayDate(date)}: no data logged`;
+      cell.title = `${displayDate(date)}: sem dados`;
     } else {
       const actual = dayRows.reduce((sum, r) => sum + r[metric], 0);
       const pct = goal > 0 ? (Math.abs(actual - goal) / goal) * 100 : 0;
       cell.classList.add(`dev-${deviationBucket(pct)}`);
-      cell.title = `${displayDate(date)}: ${Math.round(actual)} / ${goal} ${unit} (${pct.toFixed(0)}% off goal)`;
+      cell.title = `${displayDate(date)}: ${Math.round(actual)} / ${goal} ${unit} (${pct.toFixed(0)}% fora da meta)`;
     }
 
     if (date === todayStr) cell.classList.add("today");
@@ -769,11 +956,11 @@ function populateHeatmapGrid(grid, metric, days, enriched, goal) {
 // custom one — see .dev-legend-swatch::after — not the native `title`
 // attribute, which has a browser-imposed ~1s+ delay with no way to tune it)
 const DEVIATION_LEGEND = [
-  { bucket: "terrible", label: "Terrible (>30% off goal)" },
-  { bucket: "bad", label: "Bad (22.5–30% off goal)" },
-  { bucket: "poor", label: "Poor (15–22.5% off goal)" },
-  { bucket: "good", label: "Good (7.5–15% off goal)" },
-  { bucket: "perfect", label: "Perfect (≤7.5% off goal)" },
+  { bucket: "terrible", label: "Terrível (>30% fora da meta)" },
+  { bucket: "bad", label: "Ruim (22,5-30% fora da meta)" },
+  { bucket: "poor", label: "Ok (15-22,5% fora da meta)" },
+  { bucket: "good", label: "Bom (7,5-15% fora da meta)" },
+  { bucket: "perfect", label: "Perfeito (≤7,5% fora da meta)" },
 ];
 
 function renderDeviationLegend(containerId) {
@@ -782,7 +969,7 @@ function renderDeviationLegend(containerId) {
 
   const worstLabel = document.createElement("span");
   worstLabel.className = "dev-legend-label";
-  worstLabel.textContent = "Worst";
+  worstLabel.textContent = "Pior";
   container.appendChild(worstLabel);
 
   for (const { bucket, label } of DEVIATION_LEGEND) {
@@ -794,7 +981,7 @@ function renderDeviationLegend(containerId) {
 
   const bestLabel = document.createElement("span");
   bestLabel.className = "dev-legend-label";
-  bestLabel.textContent = "Best";
+  bestLabel.textContent = "Melhor";
   container.appendChild(bestLabel);
 
   container.hidden = false;
@@ -835,9 +1022,9 @@ function renderAll(enriched, goals) {
 // fit, which only exists once its panel is actually visible — so it's
 // (re)rendered on every visit to that tab instead of once at load time,
 // via onShowAll.
-const GRANULARITY_TABS = ["today", "week", "month"];
+const GRANULARITY_TABS = ["today", "week", "month", "year"];
 
-function initTabs(onShowAll) {
+function initTabs(onShowTimes, onShowTrends) {
   const buttons = document.querySelectorAll("#main-tabs .tab-btn");
   const mealToggle = document.getElementById("meal-toggle");
 
@@ -850,7 +1037,8 @@ function initTabs(onShowAll) {
     const showToggle = GRANULARITY_TABS.includes(target);
     mealToggle.classList.toggle("meal-toggle-inactive", !showToggle);
     mealToggle.tabIndex = showToggle ? 0 : -1;
-    if (target === "all") onShowAll();
+    if (target === "times") onShowTimes();
+    if (target === "trends") onShowTrends();
   }
 
   buttons.forEach((btn) => {
@@ -880,8 +1068,9 @@ function initGranularityTabs(onChange) {
 async function init() {
   log("init: loading entries, foods, and goals from Supabase");
   const state = { enriched: null, goals: null, granularity: "aggregate" };
+  renderEmptyToday();
 
-  function renderWeekAndMonth() {
+  function renderPeriodViews() {
     if (!state.enriched) return;
     renderMetricGrid(
       "week-charts",
@@ -901,16 +1090,32 @@ async function init() {
       { labelEvery: 5, labelFormat: "date" },
       state.granularity,
     );
+    renderYearGrid(
+      "year-charts",
+      "year-status",
+      state.enriched,
+      trailingPeriods(14, 26),
+      state.goals,
+      state.granularity,
+    );
   }
 
-  initTabs(() => {
-    if (state.enriched) renderAll(state.enriched, state.goals);
-  });
+  function renderTrends() {
+    if (!state.enriched) return;
+    renderAll(state.enriched, state.goals);
+  }
+
+  function renderTimesView() {
+    if (!state.enriched) return;
+    renderTimes(state.enriched);
+  }
+
+  initTabs(renderTimesView, renderTrends);
   initGranularityTabs((granularity) => {
     state.granularity = granularity;
     if (state.enriched)
       renderToday(state.enriched, state.goals, state.granularity);
-    renderWeekAndMonth();
+    renderPeriodViews();
   });
 
   let rows, labels, goals;
@@ -943,16 +1148,18 @@ async function init() {
     );
   } catch (err) {
     console.error("[calcunt] failed to load data:", err);
-    const message = "failed to load data: " + err.message;
+    const message = "falha ao carregar dados: " + err.message;
     for (const id of [
       "today-status",
       "week-status",
       "month-status",
+      "year-status",
       "all-status",
       "times-status",
-      "tabular-status",
     ]) {
-      document.getElementById(id).textContent = message;
+      const status = document.getElementById(id);
+      status.textContent = message;
+      status.hidden = false;
     }
     return;
   }
@@ -962,14 +1169,11 @@ async function init() {
   state.enriched = enriched;
   state.goals = goals;
 
-  renderToday(enriched, goals, state.granularity);
-  renderWeekAndMonth();
+  renderToday(enriched, goals, state.granularity, { animate: true });
+  renderPeriodViews();
+  if (!document.getElementById("tab-times").hidden) renderTimesView();
+  if (!document.getElementById("tab-trends").hidden) renderTrends();
 
-  // in case the user already switched to the All tab while this was loading
-  if (!document.getElementById("tab-all").hidden) renderAll(enriched, goals);
-
-  renderTimes(enriched);
-  renderTabular(enriched);
   log("init complete");
 }
 

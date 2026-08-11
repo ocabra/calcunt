@@ -331,7 +331,6 @@ tr.day-total td {
   gap: 4px;
   color: var(--text-secondary);
   font-size: 0.7rem;
-  text-transform: capitalize;
 }
 
 .meal-dot {
@@ -522,6 +521,13 @@ tr.day-total td {
   stroke: var(--goal-line);
   stroke-width: 1.5;
   stroke-dasharray: 4 3;
+}
+
+.average-line {
+  stroke: #d32f2f;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  opacity: 0.45;
 }
 
 .goal-label,
