@@ -31,9 +31,7 @@
       </nav>
 
       <!-- on/off toggle, aggregate (off) vs. per-meal (on); only meaningful
-           on Week/Month, initTabs shows/hides this per active tab. Always
-           kept in the layout (never `hidden`) so the row never re-centers
-           around a different width — see .meal-toggle-inactive. -->
+           on day/week/month/year, initTabs shows/hides this per active tab. -->
       <button class="meal-toggle meal-toggle-inactive" id="meal-toggle" type="button" aria-pressed="false" tabindex="-1">refeições</button>
     </div>
 
@@ -76,13 +74,15 @@
       <p id="all-status" hidden></p>
       <div id="all-content" class="metric-grid" hidden></div>
       <div id="all-legend" class="dev-legend" hidden></div>
+      <div id="trend-insights" class="metric-grid trend-insights" hidden></div>
     </section>
 
     <footer class="site-footer">
       <div>&copy; 2026 Henrique de Carvalho</div>
-      <div>v0.2.0 · <a href="https://github.com/ocabra/calcunt">use calcunt!</a></div>
+      <div>v0.3.0 · <a href="https://github.com/ocabra/calcunt">use calcunt</a></div>
     </footer>
   </div>
+  <div id="bar-tooltip" class="bar-tooltip" hidden></div>
 
   <script src="activity-ring.js"></script>
   <script type="module" src="view.js"></script>

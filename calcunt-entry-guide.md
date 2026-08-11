@@ -9,7 +9,7 @@ food, add or correct a nutrition label, or update nutrition goals in the
 - Supabase project name: `calcunt`
 - Supabase project reference: `lncciiekrzsvfjjuumbu`
 - Schema: `public`
-- Tables: `foods`, `food_entries`, and `meal_goals`
+- Tables: `foods`, `food_entries`, `meal_goals`, and `body_weight_entries`
 - Timestamp convention: timezone-free wall-clock time; do not perform
   geographic timezone conversion or append a timezone suffix
 
@@ -275,6 +275,54 @@ returning *;
 If a meal plan offers alternatives, explain which representative option was
 used to estimate the goal. Ignore supplements with no meaningful energy only
 when the evidence supports doing so.
+
+## Logging body weight
+
+When the user gives a body-weight measurement, store it in
+`public.body_weight_entries`, not in any food table. Use kilograms. If the user
+supplies pounds, convert to kilograms and state the conversion.
+
+Required values:
+
+- `weighed_on`: calendar date of the measurement
+- `weight_kg`: positive numeric body weight in kilograms
+- `note`: optional short context, such as `morning`, `evening`, or `after gym`
+
+Use one row per date. If the user logs a second weight for the same date, ask
+whether it should replace the existing value unless they clearly describe it as
+a correction.
+
+Example insert:
+
+```sql
+insert into public.body_weight_entries
+  (weighed_on, weight_kg, note, updated_at)
+values
+  ('2026-08-11', 74.2, 'morning', now())
+returning id, weighed_on, weight_kg, note, created_at, updated_at;
+```
+
+Example correction:
+
+```sql
+update public.body_weight_entries
+set weight_kg = 74.0,
+    note = 'morning',
+    updated_at = now()
+where id = 123
+returning id, weighed_on, weight_kg, note, updated_at;
+```
+
+Verify after writing:
+
+```sql
+select id, weighed_on, weight_kg, note, created_at, updated_at
+from public.body_weight_entries
+where id = /* returned ID */;
+```
+
+The final response should include the resolved date, stored weight in kg,
+conversion if any, note if any, inserted or updated ID, and verification result.
 
 ## Safety rules
 

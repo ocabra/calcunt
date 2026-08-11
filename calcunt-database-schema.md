@@ -2,7 +2,7 @@
 
 This document describes the deployed PostgreSQL schema in the Supabase project
 `calcunt` (project reference `lncciiekrzsvfjjuumbu`). The application uses the
-`public` schema and exposes its three tables through the Supabase Data REST API.
+`public` schema and exposes its tables through the Supabase Data REST API.
 
 ## Data model
 
@@ -35,6 +35,14 @@ erDiagram
         numeric carbs_g
         numeric protein_g
         numeric fat_g
+        timestamptz updated_at
+    }
+    body_weight_entries {
+        bigint id PK
+        date weighed_on
+        numeric weight_kg
+        text note
+        timestamptz created_at
         timestamptz updated_at
     }
 ```
@@ -118,6 +126,46 @@ stored separately: the frontend sums the four meal rows.
 There is no fiber goal because fiber is displayed but is not part of the
 goal-based visualizations.
 
+## `public.body_weight_entries`
+
+One row per body-weight measurement. Weight is independent from meals and foods,
+so it is stored in its own date-based table.
+
+| Column | Type | Rules | Meaning |
+| --- | --- | --- | --- |
+| `id` | `bigint` | Primary key; generated identity | Weight entry identifier |
+| `weighed_on` | `date` | Required; unique | Calendar date of the measurement |
+| `weight_kg` | `numeric` | Required; `> 0` | Body weight in kilograms |
+| `note` | `text` | Optional | Short context, such as morning/evening |
+| `created_at` | `timestamptz` | Required; default `now()` | Creation timestamp |
+| `updated_at` | `timestamptz` | Required; default `now()` | Last-update timestamp; callers must update it explicitly |
+
+Suggested setup SQL:
+
+```sql
+create table public.body_weight_entries (
+  id bigint generated always as identity primary key,
+  weighed_on date not null unique,
+  weight_kg numeric not null check (weight_kg > 0),
+  note text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index body_weight_entries_weighed_on_idx
+  on public.body_weight_entries (weighed_on desc);
+
+alter table public.body_weight_entries enable row level security;
+
+create policy "public read body weight entries"
+  on public.body_weight_entries
+  for select
+  to anon, authenticated
+  using (true);
+
+grant select on public.body_weight_entries to anon, authenticated;
+```
+
 ## Derived nutrition
 
 For each entry and nutrient, the application computes:
@@ -139,10 +187,13 @@ means correcting a food label automatically corrects all historical totals.
 | `food_entries_eaten_on_meal_idx` | B-tree on `(eaten_on DESC, meal, id)` for chronological application reads |
 | `food_entries_food_id_idx` | B-tree on `(food_id)` for joins and foreign-key maintenance |
 | `meal_goals_pkey` | Unique B-tree index on `meal_goals(meal)` |
+| `body_weight_entries_pkey` | Unique B-tree index on `body_weight_entries(id)` |
+| `body_weight_entries_weighed_on_key` | Unique B-tree index on `body_weight_entries(weighed_on)` |
+| `body_weight_entries_weighed_on_idx` | B-tree on `(weighed_on DESC)` for chronological application reads |
 
 ## Data API and row-level security
 
-Row-level security is enabled on all three tables. Each table has one policy
+Row-level security is enabled on all tables. Each table has one policy
 allowing `SELECT` to the `anon` and `authenticated` roles with `USING (true)`:
 
 | Table | Policy |
@@ -150,6 +201,7 @@ allowing `SELECT` to the `anon` and `authenticated` roles with `USING (true)`:
 | `foods` | `public read foods` |
 | `food_entries` | `public read food entries` |
 | `meal_goals` | `public read meal goals` |
+| `body_weight_entries` | `public read body weight entries` |
 
 There are no RLS policies for `INSERT`, `UPDATE`, or `DELETE`. Consequently,
 requests using the public publishable key can read all rows but cannot change
@@ -197,6 +249,7 @@ At the time this document was generated, the database contained:
 - 50 foods
 - 40 food entries
 - 4 meal goals
+- 0 body weight entries
 - 0 food entries with a missing food reference
 
 ## References
