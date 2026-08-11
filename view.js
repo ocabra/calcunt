@@ -1292,7 +1292,7 @@ function createPeriodSummaryCard(periodLabel, periodDays, goals) {
   };
 
   return createInsightCard(
-    "Aderência",
+    "Adesão",
     `${overallAdherence}%`,
     [
       ["CAL", `${periodMetricAdherence(periodDays, goals, "calories")}%`],
