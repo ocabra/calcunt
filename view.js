@@ -455,11 +455,11 @@ function metricStats(values) {
 
 function movingAverageSeries(values, windowSize) {
   return values.map((_, index) => {
-    if (index < windowSize) return null;
+    if (index < windowSize - 1) return null;
     const window = values
-      .slice(index - windowSize, index)
+      .slice(index - windowSize + 1, index + 1)
       .filter((value) => value > 0);
-    if (window.length === 0) return null;
+    if (window.length < windowSize) return null;
     return window.reduce((sum, value) => sum + value, 0) / window.length;
   });
 }
