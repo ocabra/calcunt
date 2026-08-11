@@ -32,6 +32,7 @@
   --radius-large: 14px;
   --radius-main: 10px;
   --tab-active-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  --cursor-pointer: url("assets/ozempic-cursor-48.png") 4 8, pointer;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -75,6 +76,12 @@ body {
     Roboto, Helvetica, Arial, sans-serif;
   margin: 0;
   padding: 18px 14px 36px;
+}
+
+a,
+button:not(:disabled),
+[role="button"] {
+  cursor: var(--cursor-pointer);
 }
 
 .container {
