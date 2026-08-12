@@ -9,7 +9,8 @@ food, add or correct a nutrition label, or update nutrition goals in the
 - Supabase project name: `calcunt`
 - Supabase project reference: `lncciiekrzsvfjjuumbu`
 - Schema: `public`
-- Tables: `foods`, `food_entries`, `meal_goals`, and `body_weight_entries`
+- Tables: `foods`, `food_entries`, `meal_goal_versions`, legacy
+  `meal_goals`, and `body_weight_entries`
 - Timestamp convention: timezone-free wall-clock time; do not perform
   geographic timezone conversion or append a timezone suffix
 
@@ -255,22 +256,52 @@ Set `updated_at = now()` and verify the updated row.
 ## Updating meal goals
 
 Only update goals when the user explicitly asks to change a target or supplies
-a revised plan. The allowed meal names are the same four categories. There is
-no fiber goal.
+a revised plan. New goal changes must be inserted into
+`public.meal_goal_versions`; do not overwrite historical goal rows. The
+allowed meal names are the same four categories. There is no fiber goal.
+
+Each goal version requires an `effective_from` calendar date. If the user says
+the new goal starts today, resolve today to an absolute date and state it. If
+the user supplies a plan but not a start date, ask for the start date before
+writing.
+
+A food entry is evaluated against the most recent goal version for the same
+meal whose `effective_from` date is on or before the food entry's calendar
+date. This is why historical goal rows must remain in place.
+
+The visual adherence bands are configured per metric:
+`calories_deviation_bands`, `carbs_deviation_bands`,
+`protein_deviation_bands`, and `fat_deviation_bands`. Each value is three
+ascending percentage cutoffs. The default `10,20,30` means `good <= 10%`,
+`ok <= 20%`, `bad <= 30%`, and `terrible > 30%` outside the goal. Use the
+existing values unless the user explicitly asks to change the evaluation bands.
 
 ```sql
-insert into public.meal_goals
-  (meal, calories, carbs_g, protein_g, fat_g, updated_at)
+insert into public.meal_goal_versions
+  (effective_from, meal, calories, carbs_g, protein_g, fat_g,
+   calories_deviation_bands, carbs_deviation_bands,
+   protein_deviation_bands, fat_deviation_bands, note)
 values
-  ('lunch', 550, 48, 47, 18, now())
-on conflict (meal) do update
+  ('2026-08-12', 'lunch', 550, 48, 47, 18,
+   '10,20,30', '10,20,30', '10,20,30', '10,20,30',
+   'revised lunch target')
+on conflict (effective_from, meal) do update
 set calories = excluded.calories,
     carbs_g = excluded.carbs_g,
     protein_g = excluded.protein_g,
     fat_g = excluded.fat_g,
-    updated_at = now()
+    calories_deviation_bands = excluded.calories_deviation_bands,
+    carbs_deviation_bands = excluded.carbs_deviation_bands,
+    protein_deviation_bands = excluded.protein_deviation_bands,
+    fat_deviation_bands = excluded.fat_deviation_bands,
+    note = excluded.note
 returning *;
 ```
+
+When a whole daily plan changes, insert or upsert one row per meal using the
+same `effective_from` date. Do not delete older versions. To correct a mistake
+in a goal version, first query the exact row by `id`, `effective_from`, and
+`meal`, then update that row only.
 
 If a meal plan offers alternatives, explain which representative option was
 used to estimate the goal. Ignore supplements with no meaningful energy only
@@ -282,10 +313,18 @@ When the user gives a body-weight measurement, store it in
 `public.body_weight_entries`, not in any food table. Use kilograms. If the user
 supplies pounds, convert to kilograms and state the conversion.
 
+If the user also supplies body-fat percentage, store it in `body_fat_pct`.
+The application derives body-fat mass as:
+
+```text
+body_fat_kg = weight_kg * body_fat_pct / 100
+```
+
 Required values:
 
 - `weighed_on`: calendar date of the measurement
 - `weight_kg`: positive numeric body weight in kilograms
+- `body_fat_pct`: optional body-fat percentage, `>= 0` and `< 100`
 - `note`: optional short context, such as `morning`, `evening`, or `after gym`
 
 Use one row per date. If the user logs a second weight for the same date, ask
@@ -296,10 +335,10 @@ Example insert:
 
 ```sql
 insert into public.body_weight_entries
-  (weighed_on, weight_kg, note, updated_at)
+  (weighed_on, weight_kg, body_fat_pct, note, updated_at)
 values
-  ('2026-08-11', 74.2, 'morning', now())
-returning id, weighed_on, weight_kg, note, created_at, updated_at;
+  ('2026-08-11', 74.2, 13.8, 'morning', now())
+returning id, weighed_on, weight_kg, body_fat_pct, note, created_at, updated_at;
 ```
 
 Example correction:
@@ -307,22 +346,32 @@ Example correction:
 ```sql
 update public.body_weight_entries
 set weight_kg = 74.0,
+    body_fat_pct = 13.8,
     note = 'morning',
     updated_at = now()
 where id = 123
-returning id, weighed_on, weight_kg, note, updated_at;
+returning id, weighed_on, weight_kg, body_fat_pct, note, updated_at;
 ```
 
 Verify after writing:
 
 ```sql
-select id, weighed_on, weight_kg, note, created_at, updated_at
+select
+  id,
+  weighed_on,
+  weight_kg,
+  body_fat_pct,
+  round(weight_kg * body_fat_pct / 100, 2) as body_fat_kg,
+  note,
+  created_at,
+  updated_at
 from public.body_weight_entries
 where id = /* returned ID */;
 ```
 
 The final response should include the resolved date, stored weight in kg,
-conversion if any, note if any, inserted or updated ID, and verification result.
+body-fat percentage and derived body-fat kg if supplied, conversion if any,
+note if any, inserted or updated ID, and verification result.
 
 ## Safety rules
 

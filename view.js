@@ -35,6 +35,14 @@ const METRIC_UNITS = {
   protein_g: "g",
   fat_g: "g",
 };
+const DEFAULT_DEVIATION_BANDS = [10, 20, 30];
+const DEFAULT_DEVIATION_BANDS_TEXT = DEFAULT_DEVIATION_BANDS.join(",");
+const DEVIATION_BAND_COLUMNS = {
+  calories: "calories_deviation_bands",
+  carbs_g: "carbs_deviation_bands",
+  protein_g: "protein_deviation_bands",
+  fat_g: "fat_deviation_bands",
+};
 
 function log(...args) {
   console.log("[calcunt]", ...args);
@@ -77,10 +85,149 @@ function appDate(date = new Date()) {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-// goals.json is keyed by meal; day-level views (Today, Week, Month, All)
-// use the daily total, which is just the sum across the four meals.
-function dailyGoal(goals, metric) {
-  return MEALS.reduce((sum, meal) => sum + (goals[meal]?.[metric] ?? 0), 0);
+// Goals are temporal. A meal entry is evaluated against the most recent goal
+// version whose effective_from date is on or before the entry's calendar date.
+// The legacy meal_goals table has no start date, so those rows are treated as
+// always-effective fallback data when meal_goal_versions is not available yet.
+const LEGACY_GOAL_EFFECTIVE_FROM = "0001-01-01";
+
+function numericGoal(row, metric) {
+  return Number(row?.[metric] ?? 0);
+}
+
+function goalValuesFromRow(row) {
+  return Object.fromEntries(
+    METRICS.map((metric) => [metric, numericGoal(row, metric)]),
+  );
+}
+
+function parseDeviationBands(value) {
+  const bands = String(value ?? DEFAULT_DEVIATION_BANDS_TEXT)
+    .split(",")
+    .map((part) => Number(part.trim()));
+  if (
+    bands.length !== 3 ||
+    bands.some((band) => !Number.isFinite(band) || band < 0) ||
+    !(bands[0] <= bands[1] && bands[1] <= bands[2])
+  ) {
+    return DEFAULT_DEVIATION_BANDS;
+  }
+  return bands;
+}
+
+function deviationBandsByMetricFromRow(row) {
+  return Object.fromEntries(
+    METRICS.map((metric) => [
+      metric,
+      parseDeviationBands(row?.[DEVIATION_BAND_COLUMNS[metric]]),
+    ]),
+  );
+}
+
+function buildGoalHistory(goalVersionRows, legacyGoalRows) {
+  const sourceRows =
+    goalVersionRows.length > 0
+      ? goalVersionRows
+      : legacyGoalRows.map((row) => ({
+          ...row,
+          effective_from: LEGACY_GOAL_EFFECTIVE_FROM,
+          ...Object.fromEntries(
+            METRICS.map((metric) => [
+              DEVIATION_BAND_COLUMNS[metric],
+              DEFAULT_DEVIATION_BANDS_TEXT,
+            ]),
+          ),
+        }));
+  const byMeal = Object.fromEntries(MEALS.map((meal) => [meal, []]));
+
+  for (const row of sourceRows) {
+    if (!byMeal[row.meal]) continue;
+    byMeal[row.meal].push({
+      effective_from: row.effective_from,
+      deviationBandsByMetric: deviationBandsByMetricFromRow(row),
+      ...goalValuesFromRow(row),
+    });
+  }
+
+  for (const meal of MEALS) {
+    byMeal[meal].sort((a, b) =>
+      a.effective_from.localeCompare(b.effective_from),
+    );
+  }
+
+  return { byMeal, isVersioned: goalVersionRows.length > 0 };
+}
+
+function goalForDate(goalHistory, date, meal, metric) {
+  const versions = goalHistory.byMeal[meal] ?? [];
+  let selected = null;
+  for (const version of versions) {
+    if (version.effective_from > date) break;
+    selected = version;
+  }
+  return numericGoal(selected, metric);
+}
+
+function goalVersionForDate(goalHistory, date, meal) {
+  const versions = goalHistory.byMeal[meal] ?? [];
+  let selected = null;
+  for (const version of versions) {
+    if (version.effective_from > date) break;
+    selected = version;
+  }
+  return selected;
+}
+
+function dailyGoalForDate(goalHistory, date, metric) {
+  return MEALS.reduce(
+    (sum, meal) => sum + goalForDate(goalHistory, date, meal, metric),
+    0,
+  );
+}
+
+function deviationBandsForDate(goalHistory, date, metric, meal = null) {
+  if (meal) {
+    return (
+      goalVersionForDate(goalHistory, date, meal)?.deviationBandsByMetric?.[
+        metric
+      ] ??
+      DEFAULT_DEVIATION_BANDS
+    );
+  }
+
+  const selectedVersions = MEALS.map((mealKey) =>
+    goalVersionForDate(goalHistory, date, mealKey),
+  ).filter(Boolean);
+  if (selectedVersions.length === 0) return DEFAULT_DEVIATION_BANDS;
+  selectedVersions.sort((a, b) =>
+    a.effective_from.localeCompare(b.effective_from),
+  );
+  return (
+    selectedVersions[selectedVersions.length - 1].deviationBandsByMetric?.[
+      metric
+    ] ?? DEFAULT_DEVIATION_BANDS
+  );
+}
+
+function goalSeriesForDates(goalHistory, dates, metric, meal = null) {
+  return dates.map((date) =>
+    meal
+      ? goalForDate(goalHistory, date, meal, metric)
+      : dailyGoalForDate(goalHistory, date, metric),
+  );
+}
+
+function periodGoalSeries(goalHistory, periods, metric, meal = null) {
+  return periods.map((period) =>
+    period.days.reduce(
+      (sum, date) =>
+        sum +
+        (meal
+          ? goalForDate(goalHistory, date, meal, metric)
+          : dailyGoalForDate(goalHistory, date, metric)),
+      0,
+    ),
+  );
 }
 
 // -- fetching ---------------------------------------------------------
@@ -503,7 +650,9 @@ function dateShort(dateStr) {
   return `${day}/${month}`;
 }
 
-function renderBarChart(metric, values, days, goal, opts = {}) {
+function renderBarChart(metric, values, days, goals, opts = {}) {
+  const goalValues = Array.isArray(goals) ? goals : values.map(() => goals);
+  const currentGoal = goalValues[goalValues.length - 1] ?? 0;
   const labelEvery = opts.labelEvery ?? 1;
   const labelFormat = opts.labelFormat ?? "weekday";
   const labels = opts.labels ?? days;
@@ -529,7 +678,7 @@ function renderBarChart(metric, values, days, goal, opts = {}) {
   const todayIndex = values.length - 1;
   const maxVal =
     Math.max(
-      goal,
+      ...goalValues,
       latestMovingAverage ?? 0,
       ...movingAverages.filter((value) => value !== null),
       ...values,
@@ -645,21 +794,24 @@ function renderBarChart(metric, values, days, goal, opts = {}) {
   }
   plot.appendChild(movingAverageLayer);
 
-  const goalY = y(goal);
-  const goalLine = document.createElementNS(svgNS, "line");
-  goalLine.setAttribute("x1", 0);
-  goalLine.setAttribute("x2", chartW);
-  goalLine.setAttribute("y1", goalY);
-  goalLine.setAttribute("y2", goalY);
-  goalLine.setAttribute("class", "goal-line");
-  plot.appendChild(goalLine);
+  function appendGoalSegment(startIndex, endIndex, goal) {
+    const goalY = y(goal);
+    const goalLine = document.createElementNS(svgNS, "line");
+    goalLine.setAttribute("x1", startIndex * slotWidth);
+    goalLine.setAttribute("x2", (endIndex + 1) * slotWidth);
+    goalLine.setAttribute("y1", goalY);
+    goalLine.setAttribute("y2", goalY);
+    goalLine.setAttribute("class", "goal-line");
+    plot.appendChild(goalLine);
+  }
 
-  const goalLabel = document.createElementNS(svgNS, "text");
-  goalLabel.setAttribute("x", 0);
-  goalLabel.setAttribute("y", goalY - 4);
-  goalLabel.setAttribute("class", "goal-label");
-  goalLabel.textContent = `meta ${goal}`;
-  plot.appendChild(goalLabel);
+  let segmentStart = 0;
+  for (let i = 1; i <= goalValues.length; i++) {
+    if (i === goalValues.length || goalValues[i] !== goalValues[segmentStart]) {
+      appendGoalSegment(segmentStart, i - 1, goalValues[segmentStart]);
+      segmentStart = i;
+    }
+  }
 
   const card = document.createElement("div");
   card.className = "card chart-card";
@@ -700,7 +852,7 @@ function renderBarChart(metric, values, days, goal, opts = {}) {
     deltaButton.disabled = latestMovingAverage === null;
     deltaButton.textContent = movingAverageLabel;
     if (latestMovingAverage !== null) {
-      const delta = latestMovingAverage - goal;
+      const delta = latestMovingAverage - currentGoal;
       deltaButton.title = `${delta >= 0 ? "+" : ""}${Math.round(delta)} ${unit}`;
     }
     deltaButton.addEventListener("click", () => {
@@ -762,7 +914,7 @@ function renderMetricGrid(
   statusId,
   enriched,
   days,
-  goals,
+  goalHistory,
   opts,
   granularity,
 ) {
@@ -787,10 +939,10 @@ function renderMetricGrid(
       const group = document.createElement("div");
       group.className = "metric-grid";
       for (const metric of METRICS) {
-        const goal = goals[meal]?.[metric] ?? 0;
+        const goals = goalSeriesForDates(goalHistory, days, metric, meal);
         const chartOpts = { ...opts };
         group.appendChild(
-          renderBarChart(metric, mealSeries[metric], days, goal, chartOpts),
+          renderBarChart(metric, mealSeries[metric], days, goals, chartOpts),
         );
       }
       container.appendChild(group);
@@ -800,12 +952,13 @@ function renderMetricGrid(
     const { series } = computeSeries(enriched, days);
     for (const metric of METRICS) {
       const chartOpts = { ...opts };
+      const goals = goalSeriesForDates(goalHistory, days, metric);
       container.appendChild(
         renderBarChart(
           metric,
           series[metric],
           days,
-          dailyGoal(goals, metric),
+          goals,
           chartOpts,
         ),
       );
@@ -822,7 +975,7 @@ function renderYearGrid(
   statusId,
   enriched,
   periods,
-  goals,
+  goalHistory,
   granularity,
 ) {
   const container = document.getElementById(containerId);
@@ -853,13 +1006,13 @@ function renderYearGrid(
       const group = document.createElement("div");
       group.className = "metric-grid";
       for (const metric of METRICS) {
-        const goal = (goals[meal]?.[metric] ?? 0) * periods[0].goalDays;
+        const goals = periodGoalSeries(goalHistory, periods, metric, meal);
         group.appendChild(
           renderBarChart(
             metric,
             mealSeries[metric],
             periods.map((p) => p.days[0]),
-            goal,
+            goals,
             opts,
           ),
         );
@@ -870,13 +1023,13 @@ function renderYearGrid(
     container.classList.remove("stacked-groups");
     const { series } = computePeriodSeries(enriched, periods);
     for (const metric of METRICS) {
-      const goal = dailyGoal(goals, metric) * periods[0].goalDays;
+      const goals = periodGoalSeries(goalHistory, periods, metric);
       container.appendChild(
         renderBarChart(
           metric,
           series[metric],
           periods.map((p) => p.days[0]),
-          goal,
+          goals,
           opts,
         ),
       );
@@ -935,15 +1088,15 @@ function drawRingProgress(svg, metric, value, goal) {
   svg.appendChild(percentLabel);
 }
 
-function updateRingCaption(valueSpan, suffixNode, value, goal, metric) {
+function updateRingCaption(valueSpan, suffixNode, value, goal, metric, bands) {
   const unit = METRIC_UNITS[metric];
   const deviationPct = goal > 0 ? (Math.abs(value - goal) / goal) * 100 : 0;
-  valueSpan.className = `value dev-text-${deviationBucket(deviationPct)}`;
+  valueSpan.className = `value dev-text-${deviationBucket(deviationPct, bands)}`;
   valueSpan.textContent = Math.round(value);
   suffixNode.textContent = ` / ${goal} ${unit}`;
 }
 
-function animateRingCard(parts, metric, finalValue, goal) {
+function animateRingCard(parts, metric, finalValue, goal, bands) {
   const startTime = performance.now();
 
   function frame(now) {
@@ -952,7 +1105,14 @@ function animateRingCard(parts, metric, finalValue, goal) {
     const eased = 1 - Math.pow(1 - t, 3);
     const value = finalValue * eased;
     drawRingProgress(parts.svg, metric, value, goal);
-    updateRingCaption(parts.valueSpan, parts.suffixNode, value, goal, metric);
+    updateRingCaption(
+      parts.valueSpan,
+      parts.suffixNode,
+      value,
+      goal,
+      metric,
+      bands,
+    );
     if (t < 1) requestAnimationFrame(frame);
   }
 
@@ -961,6 +1121,7 @@ function animateRingCard(parts, metric, finalValue, goal) {
 
 function renderRingCard(metric, value, goal, opts = {}) {
   const initialValue = opts.animate ? 0 : value;
+  const bands = opts.deviationBands ?? DEFAULT_DEVIATION_BANDS;
 
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 100 100");
@@ -983,19 +1144,19 @@ function renderRingCard(metric, value, goal, opts = {}) {
   caption.className = "ring-caption";
   const valueSpan = document.createElement("span");
   const suffixNode = document.createTextNode("");
-  updateRingCaption(valueSpan, suffixNode, initialValue, goal, metric);
+  updateRingCaption(valueSpan, suffixNode, initialValue, goal, metric, bands);
   caption.appendChild(valueSpan);
   caption.appendChild(suffixNode);
   card.appendChild(caption);
 
   if (opts.animate) {
-    animateRingCard({ svg, valueSpan, suffixNode }, metric, value, goal);
+    animateRingCard({ svg, valueSpan, suffixNode }, metric, value, goal, bands);
   }
 
   return card;
 }
 
-function renderToday(enriched, goals, granularity, opts = {}) {
+function renderToday(enriched, goalHistory, granularity, opts = {}) {
   const container = document.getElementById("today-content");
   const status = document.getElementById("today-status");
   container.innerHTML = "";
@@ -1018,8 +1179,18 @@ function renderToday(enriched, goals, granularity, opts = {}) {
       group.className = "metric-grid";
       for (const metric of METRICS) {
         const value = mealRows.reduce((sum, r) => sum + r[metric], 0);
-        const goal = goals[meal]?.[metric] ?? 0;
-        group.appendChild(renderRingCard(metric, value, goal, opts));
+        const goal = goalForDate(goalHistory, today, meal, metric);
+        group.appendChild(
+          renderRingCard(metric, value, goal, {
+            ...opts,
+            deviationBands: deviationBandsForDate(
+              goalHistory,
+              today,
+              metric,
+              meal,
+            ),
+          }),
+        );
       }
       container.appendChild(group);
     }
@@ -1030,8 +1201,11 @@ function renderToday(enriched, goals, granularity, opts = {}) {
       const card = renderRingCard(
         metric,
         value,
-        dailyGoal(goals, metric),
-        opts,
+        dailyGoalForDate(goalHistory, today, metric),
+        {
+          ...opts,
+          deviationBands: deviationBandsForDate(goalHistory, today, metric),
+        },
       );
       container.appendChild(card);
     }
@@ -1043,13 +1217,22 @@ function renderToday(enriched, goals, granularity, opts = {}) {
 }
 
 function renderEmptyToday() {
-  const emptyGoals = Object.fromEntries(
-    MEALS.map((meal) => [
-      meal,
-      Object.fromEntries(METRICS.map((metric) => [metric, 0])),
-    ]),
+  const emptyGoalRows = MEALS.map((meal) => ({
+    meal,
+    effective_from: LEGACY_GOAL_EFFECTIVE_FROM,
+    ...Object.fromEntries(
+      METRICS.map((metric) => [
+        DEVIATION_BAND_COLUMNS[metric],
+        DEFAULT_DEVIATION_BANDS_TEXT,
+      ]),
+    ),
+    ...Object.fromEntries(METRICS.map((metric) => [metric, 0])),
+  }));
+  renderToday(
+    [],
+    buildGoalHistory(emptyGoalRows, []),
+    "aggregate",
   );
-  renderToday([], emptyGoals, "aggregate");
 }
 
 // -- all: github-style heatmap, colored by deviation from goal ------------
@@ -1068,13 +1251,13 @@ function renderEmptyToday() {
 const HEATMAP_CELL = 12;
 const HEATMAP_GAP = 3;
 
-// thresholds and names must match --dev-* in calcunt.css exactly — that's
-// the single place colors are defined; this is just where the boundaries
-// (percentage points of |actual - goal| / goal) live.
-function deviationBucket(pct) {
-  if (pct <= 10) return "good";
-  if (pct <= 20) return "ok";
-  if (pct <= 30) return "bad";
+// Bucket names must match --dev-* in calcunt.css. The thresholds come from
+// each meal_goal_versions metric band column as "good,ok,bad"; e.g.
+// "10,20,30".
+function deviationBucket(pct, bands = DEFAULT_DEVIATION_BANDS) {
+  if (pct <= bands[0]) return "good";
+  if (pct <= bands[1]) return "ok";
+  if (pct <= bands[2]) return "bad";
   return "terrible";
 }
 
@@ -1112,7 +1295,7 @@ function weeksThatFit(grid) {
   );
 }
 
-function populateHeatmapGrid(grid, metric, days, enriched, goal) {
+function populateHeatmapGrid(grid, metric, days, enriched, goalHistory) {
   const unit = METRIC_UNITS[metric];
   const todayStr = appDate();
   grid.innerHTML = "";
@@ -1127,8 +1310,16 @@ function populateHeatmapGrid(grid, metric, days, enriched, goal) {
       cell.title = `${displayDate(date)}: sem dados`;
     } else {
       const actual = dayRows.reduce((sum, r) => sum + r[metric], 0);
+      const goal = dailyGoalForDate(goalHistory, date, metric);
+      if (goal <= 0) {
+        cell.classList.add("dev-none");
+        cell.title = `${displayDate(date)}: ${Math.round(actual)} ${unit} · sem meta`;
+        grid.appendChild(cell);
+        continue;
+      }
       const pct = goal > 0 ? (Math.abs(actual - goal) / goal) * 100 : 0;
-      cell.classList.add(`dev-${deviationBucket(pct)}`);
+      const bands = deviationBandsForDate(goalHistory, date, metric);
+      cell.classList.add(`dev-${deviationBucket(pct, bands)}`);
       cell.title = `${displayDate(date)}: ${Math.round(actual)} / ${goal} ${unit} (${pct.toFixed(0)}% fora da meta)`;
     }
 
@@ -1142,14 +1333,29 @@ function average(values) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function buildDailySummaries(enriched, goals, days) {
-  const metricGoals = Object.fromEntries(
-    METRICS.map((metric) => [metric, dailyGoal(goals, metric)]),
+function averageDeviationBands(bandsByMetric) {
+  if (!bandsByMetric) return DEFAULT_DEVIATION_BANDS;
+  return DEFAULT_DEVIATION_BANDS.map((_, index) =>
+    average(METRICS.map((metric) => bandsByMetric[metric]?.[index] ?? 0)),
   );
+}
 
+function buildDailySummaries(enriched, goalHistory, days) {
   return days.map((date) => {
     const rows = enriched.filter((row) => row.date === date);
     const totals = Object.fromEntries(METRICS.map((metric) => [metric, 0]));
+    const goals = Object.fromEntries(
+      METRICS.map((metric) => [
+        metric,
+        dailyGoalForDate(goalHistory, date, metric),
+      ]),
+    );
+    const deviationBandsByMetric = Object.fromEntries(
+      METRICS.map((metric) => [
+        metric,
+        deviationBandsForDate(goalHistory, date, metric),
+      ]),
+    );
     const mealKeys = new Set();
     for (const row of rows) {
       for (const metric of METRICS) totals[metric] += row[metric];
@@ -1157,26 +1363,39 @@ function buildDailySummaries(enriched, goals, days) {
     }
 
     const deviations = METRICS.map((metric) => {
-      const goal = metricGoals[metric];
+      const goal = goals[metric];
       if (goal <= 0) return null;
-      return (Math.abs(totals[metric] - goal) / goal) * 100;
+      return {
+        metric,
+        pct: (Math.abs(totals[metric] - goal) / goal) * 100,
+      };
     }).filter((value) => value !== null);
     const adherence =
       deviations.length === 0
-        ? 0
-        : average(deviations.map((pct) => Math.max(0, 100 - pct)));
+        ? null
+        : average(deviations.map(({ pct }) => Math.max(0, 100 - pct)));
 
     return {
       date,
       rows,
       mealCount: mealKeys.size,
       totals,
+      goals,
+      deviationBandsByMetric,
       logged: rows.length > 0,
       adherence,
-      withinTarget: rows.length > 0 && deviations.every((pct) => pct <= 10),
+      withinTarget:
+        rows.length > 0 &&
+        deviations.length > 0 &&
+        deviations.every(
+          ({ metric, pct }) => pct <= deviationBandsByMetric[metric][0],
+        ),
       proteinTarget:
-        rows.length > 0 && totals.protein_g >= metricGoals.protein_g,
-      calorieDelta: totals.calories - metricGoals.calories,
+        rows.length > 0 &&
+        goals.protein_g > 0 &&
+        totals.protein_g >= goals.protein_g,
+      calorieDelta:
+        goals.calories > 0 ? totals.calories - goals.calories : null,
     };
   });
 }
@@ -1184,6 +1403,7 @@ function buildDailySummaries(enriched, goals, days) {
 function createInsightCard(title, featured, rows = [], opts = {}) {
   const card = document.createElement("div");
   card.className = "card chart-card insight-card";
+  if (opts.cardClass) card.classList.add(opts.cardClass);
 
   const header = document.createElement("div");
   header.className = "chart-header";
@@ -1207,17 +1427,31 @@ function createInsightCard(title, featured, rows = [], opts = {}) {
 
   const list = document.createElement("div");
   list.className = "insight-list";
-  for (const [label, itemValue] of rows) {
+  for (const rowData of rows) {
+    const [label, itemValue, detail] = rowData;
     const row = document.createElement("div");
     row.className = "insight-row";
 
     const labelEl = document.createElement("span");
+    labelEl.className = "insight-label";
     labelEl.textContent = label;
+
     const valueEl = document.createElement("strong");
+    valueEl.className = "insight-row-value";
     valueEl.textContent = itemValue;
 
     row.appendChild(labelEl);
-    row.appendChild(valueEl);
+    if (detail) {
+      const valueGroup = document.createElement("div");
+      valueGroup.className = "insight-row-value-group";
+      const detailEl = document.createElement("small");
+      detailEl.textContent = detail;
+      valueGroup.appendChild(valueEl);
+      valueGroup.appendChild(detailEl);
+      row.appendChild(valueGroup);
+    } else {
+      row.appendChild(valueEl);
+    }
     list.appendChild(row);
   }
   card.appendChild(list);
@@ -1256,22 +1490,31 @@ function rollingAverageFromPreviousLoggedDays(values, windowSize) {
   });
 }
 
-function metricAdherence(day, goals, metric) {
-  const goal = dailyGoal(goals, metric);
+function metricAdherence(day, metric) {
+  const goal = day.goals[metric];
   if (!day.logged || goal <= 0) return null;
   const pct = (Math.abs(day.totals[metric] - goal) / goal) * 100;
   return Math.max(0, 100 - pct);
 }
 
-function periodMetricAdherence(days, goals, metric) {
+function periodMetricAdherence(days, metric) {
   const values = days
-    .map((day) => metricAdherence(day, goals, metric))
+    .map((day) => metricAdherence(day, metric))
     .filter((value) => value !== null);
   return Math.round(average(values));
 }
 
-function createPeriodSummaryCard(periodLabel, periodDays, goals) {
-  const loggedDays = periodDays.filter((day) => day.logged);
+const METRIC_SHORT_LABELS = {
+  calories: "Calorias",
+  carbs_g: "Carboidratos",
+  protein_g: "Proteína",
+  fat_g: "Gordura",
+};
+
+function createPeriodSummaryCard(periodLabel, periodDays) {
+  const loggedDays = periodDays.filter(
+    (day) => day.logged && day.adherence !== null,
+  );
   const bestDay = loggedDays.reduce(
     (best, day) => (!best || day.adherence > best.adherence ? day : best),
     null,
@@ -1283,11 +1526,11 @@ function createPeriodSummaryCard(periodLabel, periodDays, goals) {
   const overallAdherence = Math.round(
     average(loggedDays.map((day) => day.adherence)),
   );
+  const latestBands = averageDeviationBands(
+    loggedDays[loggedDays.length - 1]?.deviationBandsByMetric,
+  );
   const dayLabel = (day) => {
     const adherence = `${Math.round(day.adherence)}%`;
-    if (periodLabel === "semana") {
-      return `${weekdayName(day.date)} · ${adherence}`;
-    }
     return `${displayDate(day.date)} · ${weekdayName(day.date)} · ${adherence}`;
   };
 
@@ -1295,10 +1538,10 @@ function createPeriodSummaryCard(periodLabel, periodDays, goals) {
     "Adesão",
     `${overallAdherence}%`,
     [
-      ["CAL", `${periodMetricAdherence(periodDays, goals, "calories")}%`],
-      ["CARB", `${periodMetricAdherence(periodDays, goals, "carbs_g")}%`],
-      ["PROT", `${periodMetricAdherence(periodDays, goals, "protein_g")}%`],
-      ["GORD", `${periodMetricAdherence(periodDays, goals, "fat_g")}%`],
+      ["Calorias", `${periodMetricAdherence(periodDays, "calories")}%`],
+      ["Carboidratos", `${periodMetricAdherence(periodDays, "carbs_g")}%`],
+      ["Proteína", `${periodMetricAdherence(periodDays, "protein_g")}%`],
+      ["Gordura", `${periodMetricAdherence(periodDays, "fat_g")}%`],
       [
         "melhor dia",
         bestDay ? dayLabel(bestDay) : "0",
@@ -1308,7 +1551,51 @@ function createPeriodSummaryCard(periodLabel, periodDays, goals) {
         worstDay ? dayLabel(worstDay) : "0",
       ],
     ],
-    { periodLabel, valueClass: `dev-text-${deviationBucket(100 - overallAdherence)}` },
+    {
+      periodLabel,
+      cardClass: "adherence-card",
+      valueClass: `dev-text-${deviationBucket(
+        100 - overallAdherence,
+        latestBands,
+      )}`,
+    },
+  );
+}
+
+function latestGoalEffectiveFromForDate(goalHistory, date) {
+  const dates = MEALS.map((meal) =>
+    goalVersionForDate(goalHistory, date, meal)?.effective_from,
+  ).filter(Boolean);
+  if (dates.length === 0) return null;
+  dates.sort();
+  return dates[dates.length - 1];
+}
+
+function formatGoalValue(metric, value) {
+  const unit = METRIC_UNITS[metric];
+  return `${Math.round(value)} ${unit}`;
+}
+
+function createCurrentGoalCard(goalHistory) {
+  const today = appDate();
+  const effectiveFrom = latestGoalEffectiveFromForDate(goalHistory, today);
+  const periodLabel =
+    effectiveFrom && effectiveFrom !== LEGACY_GOAL_EFFECTIVE_FROM
+      ? `desde ${dateShort(effectiveFrom)}`
+      : "inicial";
+
+  return createInsightCard(
+    "Meta vigente",
+    formatGoalValue(
+      "calories",
+      dailyGoalForDate(goalHistory, today, "calories"),
+    ),
+    METRICS.map((metric) => [
+      METRIC_SHORT_LABELS[metric],
+      formatGoalValue(metric, dailyGoalForDate(goalHistory, today, metric)),
+      `±${deviationBandsForDate(goalHistory, today, metric)[0]}%`,
+    ]),
+    { periodLabel, cardClass: "goal-card" },
   );
 }
 
@@ -1334,6 +1621,21 @@ function createWeightCaloriesChartCard(completeDays, weights) {
     }))
     .filter((point) => point.value !== null);
   const hasWeights = weightPoints.length > 0;
+  const bodyFatPoints = chartDays
+    .map((day, index) => {
+      const entry = weightByDate.get(day.date);
+      const value =
+        entry?.body_fat_pct === null || entry?.body_fat_pct === undefined
+          ? null
+          : (entry.weight_kg * entry.body_fat_pct) / 100;
+      return {
+        index,
+        date: day.date,
+        value,
+        pct: entry?.body_fat_pct ?? null,
+      };
+    })
+    .filter((point) => point.value !== null);
 
   const card = document.createElement("div");
   card.className = "card chart-card weight-calories-card";
@@ -1346,6 +1648,7 @@ function createWeightCaloriesChartCard(completeDays, weights) {
   for (const [label, className] of [
     ["mm7 kcal", "trend-dot-calories"],
     ["peso", "trend-dot-weight"],
+    ["gordura", "trend-dot-body-fat"],
   ]) {
     const item = document.createElement("span");
     const dot = document.createElement("span");
@@ -1366,11 +1669,14 @@ function createWeightCaloriesChartCard(completeDays, weights) {
     margin.left +
     (chartDays.length <= 1 ? 0.5 : index / (chartDays.length - 1)) * plotW;
   const calorieRange = chartRange(calorieMm7, 0, 1, { floorZero: true });
-  const weightRange = chartRange(
-    weightPoints.map((point) => point.value),
-    0,
-    1,
-  );
+  const kgValues = [
+    ...weightPoints.map((point) => point.value),
+    ...bodyFatPoints.map((point) => point.value),
+  ];
+  const weightRange =
+    bodyFatPoints.length > 0
+      ? { min: 0, max: Math.max(...kgValues, 1) * 1.08 }
+      : chartRange(kgValues, 0, 1);
   const yCalories = (value) =>
     margin.top +
     plotH -
@@ -1388,13 +1694,13 @@ function createWeightCaloriesChartCard(completeDays, weights) {
     "aria-labelledby": "weight-calories-title weight-calories-description",
   });
   const title = svgElement("title", { id: "weight-calories-title" });
-  title.textContent = "Peso x calorias";
+  title.textContent = "Peso, gordura corporal e calorias";
   svg.appendChild(title);
   const description = svgElement("desc", {
     id: "weight-calories-description",
   });
   description.textContent =
-    "Linha de média móvel de calorias e linha de peso corporal por dia.";
+    "Linha de média móvel de calorias, linha de peso corporal e linha de gordura corporal em quilogramas.";
   svg.appendChild(description);
 
   for (let tick = 0; tick <= 2; tick++) {
@@ -1484,6 +1790,32 @@ function createWeightCaloriesChartCard(completeDays, weights) {
     svg.appendChild(circle);
   }
 
+  const plottedBodyFatPoints = bodyFatPoints.map((point) => ({
+    ...point,
+    x: x(point.index),
+    y: yWeight(point.value),
+  }));
+  if (plottedBodyFatPoints.length >= 2) {
+    svg.appendChild(
+      svgElement("polyline", {
+        points: polylinePoints(plottedBodyFatPoints),
+        class: "trend-body-fat-line",
+      }),
+    );
+  }
+  for (const point of plottedBodyFatPoints) {
+    const circle = svgElement("circle", {
+      cx: point.x,
+      cy: point.y,
+      r: 3.2,
+      class: "trend-body-fat-point",
+    });
+    const tip = svgElement("title");
+    tip.textContent = `${displayDate(point.date)} · ${point.value.toFixed(1)} kg gordura (${point.pct.toFixed(2)}%)`;
+    circle.appendChild(tip);
+    svg.appendChild(circle);
+  }
+
   for (const index of new Set([
     0,
     Math.floor((chartDays.length - 1) / 2),
@@ -1504,65 +1836,32 @@ function createWeightCaloriesChartCard(completeDays, weights) {
   return card;
 }
 
-function renderTrendInsights(container, enriched, goals, days, weights = []) {
+function renderTrendInsights(container, enriched, goalHistory, days, weights = []) {
   container.innerHTML = "";
   const today = appDate();
-  const completeDays = buildDailySummaries(enriched, goals, days).filter(
+  const effectiveFrom = latestGoalEffectiveFromForDate(goalHistory, today);
+  const completeDays = buildDailySummaries(enriched, goalHistory, days).filter(
     (day) => day.date < today,
   );
+  const currentGoalDays =
+    effectiveFrom && effectiveFrom !== LEGACY_GOAL_EFFECTIVE_FROM
+      ? completeDays.filter((day) => day.date >= effectiveFrom)
+      : completeDays;
+  container.appendChild(createCurrentGoalCard(goalHistory));
   container.appendChild(
-    createPeriodSummaryCard("semana", completeDays.slice(-7), goals),
-  );
-  container.appendChild(
-    createPeriodSummaryCard("mês", completeDays.slice(-30), goals),
+    createPeriodSummaryCard("desde a meta", currentGoalDays),
   );
   container.appendChild(createWeightCaloriesChartCard(completeDays, weights));
 
   container.hidden = false;
 }
 
-// worst -> best, with the bucket's threshold for a hover tooltip (a fast
-// custom one — see .dev-legend-swatch::after — not the native `title`
-// attribute, which has a browser-imposed ~1s+ delay with no way to tune it)
-const DEVIATION_LEGEND = [
-  { bucket: "terrible", label: "Terrível (>30% fora da meta)" },
-  { bucket: "bad", label: "Ruim (20-30% fora da meta)" },
-  { bucket: "ok", label: "Ok (10-20% fora da meta)" },
-  { bucket: "good", label: "Bom (≤10% fora da meta)" },
-];
-
-function renderDeviationLegend(containerId) {
-  const container = document.getElementById(containerId);
-  container.innerHTML = "";
-
-  const worstLabel = document.createElement("span");
-  worstLabel.className = "dev-legend-label";
-  worstLabel.textContent = "Pior";
-  container.appendChild(worstLabel);
-
-  for (const { bucket, label } of DEVIATION_LEGEND) {
-    const swatch = document.createElement("span");
-    swatch.className = `dev-legend-swatch dev-${bucket}`;
-    swatch.setAttribute("data-tooltip", label);
-    container.appendChild(swatch);
-  }
-
-  const bestLabel = document.createElement("span");
-  bestLabel.className = "dev-legend-label";
-  bestLabel.textContent = "Melhor";
-  container.appendChild(bestLabel);
-
-  container.hidden = false;
-}
-
-function renderAll(enriched, goals, weights = []) {
+function renderAll(enriched, goalHistory, weights = []) {
   const container = document.getElementById("all-content");
   const status = document.getElementById("all-status");
   container.innerHTML = "";
   status.hidden = true;
   container.hidden = false;
-  // renderDeviationLegend("all-legend");
-  document.getElementById("all-legend").hidden = true;
 
   const shells = METRICS.map((metric) => ({
     metric,
@@ -1577,12 +1876,12 @@ function renderAll(enriched, goals, weights = []) {
   const days = trailingDates(totalDays);
 
   for (const { metric, grid } of shells) {
-    populateHeatmapGrid(grid, metric, days, enriched, dailyGoal(goals, metric));
+    populateHeatmapGrid(grid, metric, days, enriched, goalHistory);
   }
   renderTrendInsights(
     document.getElementById("trend-insights"),
     enriched,
-    goals,
+    goalHistory,
     days,
     weights,
   );
@@ -1642,10 +1941,10 @@ function initGranularityTabs(onChange) {
 // -- init ---------------------------------------------------------------
 
 async function init() {
-  log("init: loading entries, foods, and goals from Supabase");
+  log("init: loading entries, foods, and goal history from Supabase");
   const state = {
     enriched: null,
-    goals: null,
+    goalHistory: null,
     weights: [],
     granularity: "aggregate",
   };
@@ -1659,7 +1958,7 @@ async function init() {
       "week-status",
       state.enriched,
       trailingDates(7),
-      state.goals,
+      state.goalHistory,
       { labelEvery: 1, labelFormat: "weekday", movingAverageWindow: 3 },
       state.granularity,
     );
@@ -1668,7 +1967,7 @@ async function init() {
       "month-status",
       state.enriched,
       trailingDates(30),
-      state.goals,
+      state.goalHistory,
       { labelEvery: 5, labelFormat: "date", movingAverageWindow: 7 },
       state.granularity,
     );
@@ -1677,14 +1976,14 @@ async function init() {
       "year-status",
       state.enriched,
       trailingPeriods(14, 26),
-      state.goals,
+      state.goalHistory,
       state.granularity,
     );
   }
 
   function renderTrends() {
     if (!state.enriched) return;
-    renderAll(state.enriched, state.goals, state.weights);
+    renderAll(state.enriched, state.goalHistory, state.weights);
   }
 
   function renderTimesView() {
@@ -1696,29 +1995,34 @@ async function init() {
   initGranularityTabs((granularity) => {
     state.granularity = granularity;
     if (state.enriched)
-      renderToday(state.enriched, state.goals, state.granularity);
+      renderToday(state.enriched, state.goalHistory, state.granularity);
     renderPeriodViews();
   });
-  let rows, labels, goals, weights;
+  let rows, labels, goalHistory, weights;
   try {
-    const [entryRows, foodRows, goalRows, weightRows] = await Promise.all([
-      fetchTable(
-        "food_entries",
-        "select=eaten_on,meal,food_id,quantity_g&order=eaten_on.desc,meal.asc,id.asc",
-      ),
-      fetchTable(
-        "foods",
-        "select=id,name,per_g,calories,carbs_g,protein_g,fat_g,fiber_g&order=id.asc",
-      ),
-      fetchTable(
-        "meal_goals",
-        "select=meal,calories,carbs_g,protein_g,fat_g&order=meal.asc",
-      ),
-      fetchOptionalTable(
-        "body_weight_entries",
-        "select=weighed_on,weight_kg&order=weighed_on.asc",
-      ),
-    ]);
+    const [entryRows, foodRows, goalRows, goalVersionRows, weightRows] =
+      await Promise.all([
+        fetchTable(
+          "food_entries",
+          "select=eaten_on,meal,food_id,quantity_g&order=eaten_on.desc,meal.asc,id.asc",
+        ),
+        fetchTable(
+          "foods",
+          "select=id,name,per_g,calories,carbs_g,protein_g,fat_g,fiber_g&order=id.asc",
+        ),
+        fetchTable(
+          "meal_goals",
+          "select=meal,calories,carbs_g,protein_g,fat_g&order=meal.asc",
+        ),
+        fetchOptionalTable(
+          "meal_goal_versions",
+          "select=effective_from,meal,calories,carbs_g,protein_g,fat_g,calories_deviation_bands,carbs_deviation_bands,protein_deviation_bands,fat_deviation_bands&order=effective_from.asc,meal.asc",
+        ),
+        fetchOptionalTable(
+          "body_weight_entries",
+          "select=weighed_on,weight_kg,body_fat_pct&order=weighed_on.asc",
+        ),
+      ]);
     rows = entryRows.map((row) => ({
       date: calendarDate(row.eaten_on),
       time: clockTime(row.eaten_on),
@@ -1728,12 +2032,14 @@ async function init() {
       quantity_g: Number(row.quantity_g),
     }));
     labels = new Map(foodRows.map((label) => [label.id, label]));
-    goals = Object.fromEntries(
-      goalRows.map(({ meal, ...goal }) => [meal, goal]),
-    );
+    goalHistory = buildGoalHistory(goalVersionRows, goalRows);
     weights = weightRows.map((row) => ({
       date: row.weighed_on,
       weight_kg: Number(row.weight_kg),
+      body_fat_pct:
+        row.body_fat_pct === null || row.body_fat_pct === undefined
+          ? null
+          : Number(row.body_fat_pct),
     }));
   } catch (err) {
     console.error("[calcunt] failed to load data:", err);
@@ -1756,10 +2062,10 @@ async function init() {
   const enriched = enrichRows(rows, labels);
   log(`enriched ${enriched.length} rows with nutrition data`);
   state.enriched = enriched;
-  state.goals = goals;
+  state.goalHistory = goalHistory;
   state.weights = weights;
 
-  renderToday(enriched, goals, state.granularity, { animate: true });
+  renderToday(enriched, goalHistory, state.granularity, { animate: true });
   renderPeriodViews();
   if (!document.getElementById("tab-times").hidden) renderTimesView();
   if (!document.getElementById("tab-trends").hidden) renderTrends();

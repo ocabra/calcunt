@@ -14,6 +14,7 @@
   --row-alt: #fafafa;
   --goal-line: #c7c7cc;
   --weight-line: #1c1c1e;
+  --body-fat-line: #b14fc5;
 
   /* one accent per metric, fixed order: calories, carbs, protein, fat */
   --series-1: #2a78d6;
@@ -21,9 +22,8 @@
   --series-3: #1baf7a;
   --series-4: #eda100;
 
-  /* Deviation-from-goal scale, single source of truth for heatmap cells,
-     legend swatches and ring caption text. 4 tiers by |deviation %|:
-     good <=10, ok <=20, bad <=30, terrible >30 (see deviationBucket). */
+  /* Deviation-from-goal colors for heatmap cells and ring caption text. The
+     percentage thresholds come from meal_goal_versions. */
   --dev-good: #1b8a3c;
   --dev-ok: #74c686;
   --dev-bad: #f2a29d;
@@ -46,6 +46,7 @@
     --row-alt: #212123;
     --goal-line: #48484a;
     --weight-line: #f5f5f7;
+    --body-fat-line: #c56ddb;
 
     --series-1: #3987e5;
     --series-2: #d95926;
@@ -174,7 +175,7 @@ h1.brand-logo {
   font: inherit;
   font-size: 0.72rem;
   font-weight: 600;
-  letter-spacing: 0.03em;
+  letter-spacing: 0;
   cursor: pointer;
   transition: background-color 0.15s ease-in-out, color 0.1s ease-in-out, border-color 0.15s ease-in-out;
 }
@@ -634,14 +635,9 @@ tr.day-total td {
   stroke-dasharray: 4 3;
 }
 
-.goal-label,
 .day-label {
   font-size: 8.5px;
   fill: var(--text-secondary);
-}
-
-.goal-label {
-  text-anchor: start;
 }
 
 .day-label {
@@ -746,81 +742,40 @@ tr.day-total td {
   background: var(--dev-terrible);
 }
 
-/* worst -> best swatches, no labels — hover each for its threshold */
-.dev-legend {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 14px;
-}
-
-.dev-legend-label {
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--text-secondary);
-}
-
-.dev-legend-swatch {
-  position: relative;
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-}
-
-/* fast custom tooltip — the native `title` attribute's ~1s+ delay can't be
-   tuned, so each swatch gets its own via data-tooltip + ::after instead */
-.dev-legend-swatch::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--text-primary);
-  color: var(--card-bg);
-  font-size: 0.7rem;
-  font-weight: 600;
-  white-space: nowrap;
-  padding: 4px 8px;
-  border-radius: 6px;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transition: opacity 0.08s ease-out;
-  z-index: 10;
-}
-
-.dev-legend-swatch:hover::after {
-  opacity: 1;
-  visibility: visible;
-}
-
 .trend-insights {
   margin-top: 10px;
 }
 
 .insight-card {
-  min-height: 150px;
+  min-height: 168px;
 }
 
 .insight-card .chart-header {
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+}
+
+.insight-card .chart-title-row {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
 }
 
 .insight-period {
   color: var(--text-secondary);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 700;
   text-transform: none;
 }
 
 .insight-value {
   color: var(--text-primary);
-  font-size: 1.2rem;
+  font-size: 1.35rem;
   font-weight: 800;
   line-height: 1.1;
   text-align: right;
+}
+
+.goal-card .insight-value {
+  font-size: 1.5rem;
 }
 
 .insight-value.dev-text-good {
@@ -841,28 +796,54 @@ tr.day-total td {
 
 .insight-list {
   display: grid;
-  gap: 5px;
-  margin-top: 12px;
+  gap: 7px;
+  margin-top: 14px;
 }
 
 .insight-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 10px;
+  gap: 14px;
   color: var(--text-secondary);
-  font-size: 0.76rem;
+  font-size: 0.78rem;
 }
 
-.insight-row span {
+.insight-label {
   min-width: 0;
+  color: var(--text-secondary);
 }
 
+.insight-row-value,
 .insight-row strong {
   color: var(--text-primary);
   font-weight: 800;
   text-align: right;
   white-space: nowrap;
+}
+
+.insight-row-value-group {
+  display: grid;
+  gap: 1px;
+  justify-items: end;
+  min-width: 0;
+}
+
+.insight-row-value-group small {
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.goal-card .insight-row {
+  align-items: start;
+}
+
+.goal-card .insight-label {
+  padding-top: 1px;
 }
 
 .weight-calories-card {
@@ -904,6 +885,10 @@ tr.day-total td {
 
 .trend-dot-weight {
   background: var(--weight-line);
+}
+
+.trend-dot-body-fat {
+  background: var(--body-fat-line);
 }
 
 .weight-calories-chart {
@@ -956,6 +941,20 @@ tr.day-total td {
 
 .trend-weight-point {
   fill: var(--weight-line);
+  stroke: var(--card-bg);
+  stroke-width: 1.2;
+}
+
+.trend-body-fat-line {
+  fill: none;
+  stroke: var(--body-fat-line);
+  stroke-width: 2;
+  opacity: 0.82;
+  stroke-dasharray: 5 4;
+}
+
+.trend-body-fat-point {
+  fill: var(--body-fat-line);
   stroke: var(--card-bg);
   stroke-width: 1.2;
 }

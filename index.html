@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Saira:wght@700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="calcunt.css?v=0.4.2">
+  <link rel="stylesheet" href="calcunt.css?v=0.6.4">
 </head>
 <body>
   <div class="container">
@@ -27,7 +27,7 @@
         <button class="tab-btn" data-tab="month">mês</button>
         <button class="tab-btn" data-tab="year">ano</button>
         <button class="tab-btn" data-tab="times">horários</button>
-        <button class="tab-btn" data-tab="trends">tendências</button>
+        <button class="tab-btn" data-tab="trends">análise</button>
       </nav>
 
       <!-- on/off toggle, aggregate (off) vs. per-meal (on); only meaningful
@@ -73,18 +73,17 @@
     <section id="tab-trends" class="tab-panel" hidden>
       <p id="all-status" hidden></p>
       <div id="all-content" class="metric-grid" hidden></div>
-      <div id="all-legend" class="dev-legend" hidden></div>
       <div id="trend-insights" class="metric-grid trend-insights" hidden></div>
     </section>
 
     <footer class="site-footer">
       <div>&copy; 2026 Henrique de Carvalho</div>
-      <div>v0.4.2 · <a href="https://github.com/ocabra/calcunt">use calcunt</a></div>
+      <div>v0.6.4 · <a href="https://github.com/ocabra/calcunt">use calcunt</a></div>
     </footer>
   </div>
   <div id="bar-tooltip" class="bar-tooltip" hidden></div>
 
-  <script src="activity-ring.js?v=0.4.2"></script>
-  <script type="module" src="view.js?v=0.4.2"></script>
+  <script src="activity-ring.js?v=0.6.4"></script>
+  <script type="module" src="view.js?v=0.6.4"></script>
 </body>
 </html>
