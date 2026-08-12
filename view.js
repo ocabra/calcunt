@@ -668,7 +668,7 @@ function renderBarChart(metric, values, days, goals, opts = {}) {
     : [];
   const latestMovingAverage = latestValue(movingAverages);
   const movingAverageLabel = movingAverageWindow
-    ? `mm${movingAverageWindow} - meta`
+    ? `mm${movingAverageWindow}`
     : null;
   const unit = METRIC_UNITS[metric];
   const width = 300;
