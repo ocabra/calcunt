@@ -650,6 +650,10 @@ function dateShort(dateStr) {
   return `${day}/${month}`;
 }
 
+function displayGoal(goal) {
+  return Math.round(goal);
+}
+
 function renderBarChart(metric, values, days, goals, opts = {}) {
   const goalValues = Array.isArray(goals) ? goals : values.map(() => goals);
   const currentGoal = goalValues[goalValues.length - 1] ?? 0;
@@ -1061,10 +1065,11 @@ function metricColorHex(metric) {
 function drawRingProgress(svg, metric, value, goal) {
   const unit = METRIC_UNITS[metric];
   const rawProgress = goal > 0 ? value / goal : 0;
+  const shownGoal = displayGoal(goal);
   svg.innerHTML = "";
 
   const titleEl = document.createElementNS(SVG_NS, "title");
-  titleEl.textContent = `${Math.round(value)} / ${goal} ${unit} (${Math.round(rawProgress * 100)}%)`;
+  titleEl.textContent = `${Math.round(value)} / ${shownGoal} ${unit} (${Math.round(rawProgress * 100)}%)`;
   svg.appendChild(titleEl);
 
   // activity-ring.js: ported from the activity-rings reference project —
@@ -1093,7 +1098,7 @@ function updateRingCaption(valueSpan, suffixNode, value, goal, metric, bands) {
   const deviationPct = goal > 0 ? (Math.abs(value - goal) / goal) * 100 : 0;
   valueSpan.className = `value dev-text-${deviationBucket(deviationPct, bands)}`;
   valueSpan.textContent = Math.round(value);
-  suffixNode.textContent = ` / ${goal} ${unit}`;
+  suffixNode.textContent = ` / ${displayGoal(goal)} ${unit}`;
 }
 
 function animateRingCard(parts, metric, finalValue, goal, bands) {
@@ -1320,7 +1325,7 @@ function populateHeatmapGrid(grid, metric, days, enriched, goalHistory) {
       const pct = goal > 0 ? (Math.abs(actual - goal) / goal) * 100 : 0;
       const bands = deviationBandsForDate(goalHistory, date, metric);
       cell.classList.add(`dev-${deviationBucket(pct, bands)}`);
-      cell.title = `${displayDate(date)}: ${Math.round(actual)} / ${goal} ${unit} (${pct.toFixed(0)}% fora da meta)`;
+      cell.title = `${displayDate(date)}: ${Math.round(actual)} / ${displayGoal(goal)} ${unit} (${pct.toFixed(0)}% fora da meta)`;
     }
 
     if (date === todayStr) cell.classList.add("today");
@@ -1573,7 +1578,7 @@ function latestGoalEffectiveFromForDate(goalHistory, date) {
 
 function formatGoalValue(metric, value) {
   const unit = METRIC_UNITS[metric];
-  return `${Math.round(value)} ${unit}`;
+  return `${displayGoal(value)} ${unit}`;
 }
 
 function createCurrentGoalCard(goalHistory) {
